@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-light: #ffffff;
+  --bg-dark: #0b0c10;
+  --card-light: #ffffff;
+  --card-dark: #0f1115;
+  --text-light: #111827;
+  --text-dark: #f9fafb;
+  --muted-light: #6b7280;
+  --muted-dark: #9aa3af;
+  --brand-600: #5558d0;
+  --ring-light: rgba(0, 0, 0, 0.05);
+  --ring-dark: rgba(255, 255, 255, 0.05);
+  --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-[var(--bg-light)] text-[var(--text-light)] dark:bg-[var(--bg-dark)] dark:text-[var(--text-dark)] antialiased font-sans;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.container-narrow {
+  @apply container max-w-5xl;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition-all duration-200 ease-in-out;
+  @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-brand-600 focus-visible:ring-offset-[var(--bg-light)] dark:focus-visible:ring-offset-[var(--bg-dark)];
+}
+
+.btn:hover {
+  @apply opacity-90;
+}
+
+.btn:active {
+  @apply scale-[.99];
+}
+
+.btn-primary {
+  @apply bg-brand-600 text-white shadow-soft;
+}
+
+.btn-ghost {
+  @apply bg-transparent border border-black/10 dark:border-white/10 text-neutral-800 dark:text-neutral-200;
+}
+
+.btn-ghost:hover {
+    @apply bg-black/5 dark:bg-white/5;
+}
+
+.card {
+  @apply rounded-xl bg-[var(--card-light)] dark:bg-[var(--card-dark)] shadow-soft ring-1 ring-[var(--ring-light)] dark:ring-[var(--ring-dark)];
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.link {
+  @apply text-brand-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 rounded;
+}

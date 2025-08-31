@@ -1,0 +1,26 @@
+# Core Dependencies
+fastapi
+uvicorn[standard]
+httpx
+redis[hiredis]
+pydantic
+python-multipart
+aiofiles
+sqlalchemy
+alembic
+asyncpg
+celery
+flower
+playwright
+beautifulsoup4
+lxml
+prometheus-client
+pyyaml
+structlog
+tenacity
+python-dotenv
+pytest
+pytest-asyncio
+black
+aiomysql
+psycopg[binary]

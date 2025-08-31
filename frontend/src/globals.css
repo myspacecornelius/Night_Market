@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Night Market Modern - Light Mode (Bone base) */
+    --background: 0 0% 96.5%; /* Bone #F6F6F6 */
+    --foreground: 240 9% 4%; /* Ink #0B0B0C */
+ 
+    --card: 0 0% 100%;
+    --card-foreground: 240 9% 4%;
+ 
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 9% 4%;
+ 
+    --primary: 4 79% 57%; /* Heat #E94A3D */
+    --primary-foreground: 0 0% 96.5%;
+ 
+    --secondary: 220 13% 91%;
+    --secondary-foreground: 240 9% 4%;
+ 
+    --muted: 220 13% 91%;
+    --muted-foreground: 215 16% 47%; /* Steel #717784 */
+ 
+    --accent: 120 100% 88%; /* Neon hint #C3FFD0 */
+    --accent-foreground: 240 9% 4%;
+ 
+    --destructive: 4 79% 57%;
+    --destructive-foreground: 0 0% 96.5%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 4 79% 57%;
+ 
+    --radius: 0.75rem;
+  }
+ 
+  .dark {
+    /* Night Market Modern - Dark Mode (Ink base) */
+    --background: 240 9% 4%; /* Ink #0B0B0C */
+    --foreground: 0 0% 96.5%; /* Bone #F6F6F6 */
+ 
+    --card: 240 6% 8%;
+    --card-foreground: 0 0% 96.5%;
+ 
+    --popover: 240 6% 8%;
+    --popover-foreground: 0 0% 96.5%;
+ 
+    --primary: 4 79% 57%; /* Heat #E94A3D */
+    --primary-foreground: 0 0% 96.5%;
+ 
+    --secondary: 240 6% 12%;
+    --secondary-foreground: 0 0% 96.5%;
+ 
+    --muted: 240 6% 12%;
+    --muted-foreground: 215 16% 47%; /* Steel #717784 */
+ 
+    --accent: 120 100% 88%; /* Neon hint #C3FFD0 */
+    --accent-foreground: 240 9% 4%;
+ 
+    --destructive: 4 79% 57%;
+    --destructive-foreground: 0 0% 96.5%;
+ 
+    --border: 240 6% 12%;
+    --input: 240 6% 12%;
+    --ring: 4 79% 57%;
+  }
+}
+ 
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-humanist;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-grotesk font-semibold tracking-tight;
+  }
+  
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  /* Focus styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  
+  /* Selection styles */
+  ::selection {
+    @apply bg-heat/20 text-foreground;
+  }
+}
+
+@layer components {
+  /* Glass morphism utility */
+  .glass {
+    @apply backdrop-blur-md bg-background/80 border border-border/50;
+  }
+  
+  /* Heat glow effect */
+  .heat-glow {
+    @apply shadow-heat;
+  }
+  
+  /* Neon glow effect */
+  .neon-glow {
+    @apply shadow-neon;
+  }
+  
+  /* Container utilities */
+  .container-narrow {
+    @apply container max-w-2xl;
+  }
+  
+  .container-wide {
+    @apply container max-w-7xl;
+  }
+  
+  /* Button base styles */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+  
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border;
+  }
+  
+  .btn-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground;
+  }
+  
+  .btn-heat {
+    @apply bg-heat text-bone hover:bg-heat/90 heat-glow;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply rounded-lg border border-border bg-card text-card-foreground shadow-soft;
+  }
+  
+  .card-glass {
+    @apply glass rounded-lg shadow-glass;
+  }
+}
+
+@layer utilities {
+  /* Animation utilities */
+  .animate-in {
+    @apply animate-fade-in;
+  }
+  
+  .animate-up {
+    @apply animate-slide-up;
+  }
+  
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  /* Gradient utilities */
+  .gradient-heat {
+    background: linear-gradient(135deg, theme('colors.heat') 0%, theme('colors.heat')/0.8 100%);
+  }
+  
+  .gradient-neon {
+    background: linear-gradient(135deg, theme('colors.neon') 0%, theme('colors.neon')/0.8 100%);
+  }
+  
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* === shadcn tokens (card/border/etc.) === */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 4.9% 83.9%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+  }
+}

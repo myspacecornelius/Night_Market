@@ -1,0 +1,57 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+node_modules
+dist
+dist-ssr
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+venv/
+ENV/
+env/
+.venv
+snpd.egg-info/
+
+# Environment variables
+.env
+.env.local
+*.env
+
+# Database
+*.db
+*.sqlite
+postgres-data/
+redis-data/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Test data
+test_results/
+coverage/
+
+# User data
+user_data/
+profiles/
+<<<<<<< HEAD
+
+# Custom ignores
+services/api/alembic.ini
+=======
+services/api/alembic.ini
+>>>>>>> 3a18134 (chore(alembic): remove redundant services/api/alembic.ini and ignore it)
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

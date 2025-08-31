@@ -1,0 +1,25 @@
+{
+    "name": "dharma-monorepo",
+    "private": true,
+    "packageManager": "npm@10.0.0",
+    "scripts": {
+        "dev": "turbo run dev",
+        "build": "turbo run build",
+        "test": "turbo run test"
+    },
+    "workspaces": [
+        "frontend"
+    ],
+    "devDependencies": {
+        "@testing-library/jest-dom": "^6.8.0",
+        "@testing-library/react": "^16.3.0",
+        "@types/node": "^24.3.0",
+        "@vitest/ui": "^3.2.4",
+        "jsdom": "^26.1.0",
+        "turbo": "^2.0.9",
+        "vitest": "^3.2.4"
+    },
+    "dependencies": {
+        "python": "^0.0.4"
+    }
+}

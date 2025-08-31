@@ -1,0 +1,26 @@
+{
+  "name": "Dharma Development Environment",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md",
+        "Makefile"
+      ]
+    },
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+  "postCreateCommand": "if [ ! -f .env ]; then cp .env.example .env; fi && pip install -r requirements.txt && pip install pre-commit && pre-commit install",
+  "remoteUser": "root"
+}
