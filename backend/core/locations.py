@@ -1,9 +1,9 @@
 
 from sqlalchemy.orm import Session
-from geoalchemy2 import WKTElement
-from shapely.geometry import Point
+from geoalchemy2.elements import WKTElement
 from sqlalchemy import func
 import geohash2
+from uuid import UUID
 
 from backend.models import location as location_models
 from backend.models import post as post_models
@@ -12,7 +12,7 @@ from backend.schemas import post as post_schemas
 def create_location_and_post(
     db: Session,
     post_create: post_schemas.PostCreate,
-    user_id: int,
+    user_id: UUID,
 ):
     # Create a WKTElement for the location
     point = WKTElement(f'POINT({post_create.geo_tag_long} {post_create.geo_tag_lat})', srid=4326)

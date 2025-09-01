@@ -260,7 +260,7 @@ class MonitorService:
 
         # Connect to Redis
         self.redis_client = await redis.from_url(
-            "redis://localhost:6379",
+            os.getenv("REDIS_URL", "redis://redis:6379/0"),
             encoding="utf-8",
             decode_responses=True
         )

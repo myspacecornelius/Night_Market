@@ -273,7 +273,7 @@ class CheckoutService:
         
         # Connect to Redis
         self.redis_client = await redis.from_url(
-            "redis://localhost:6379",
+            os.getenv("REDIS_URL", "redis://redis:6379/0"),
             encoding="utf-8",
             decode_responses=True
         )
@@ -313,7 +313,7 @@ class CheckoutService:
                         variant_id=task_info.get('variant_id', ''),
                         size=task_info.get('size', ''),
                         retailer=task_info['retailer'],
-                        mode=task_info['mode']
+                        mode=task_info['mode'],
                         is_dry_run=task_info.get('is_dry_run', False)
 
                     )
@@ -367,11 +367,7 @@ class CheckoutService:
                 )
             else:
                 result = await engine.checkout(task, profile)
-             
-             # Store result in database for historical records
-             await self._store_checkout_result(task, result)
 
-            
             # Store result in database for historical records
             await self._store_checkout_result(task, result)
             

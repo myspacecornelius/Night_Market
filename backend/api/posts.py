@@ -27,8 +27,19 @@ def get_global_feed(skip: int = 0, limit: int = 10, db: Session = Depends(get_db
         return json.loads(cached_posts)
 
     posts = db.query(Post).order_by(Post.timestamp.desc()).offset(skip).limit(limit).all()
-    # This is a naive caching implementation. A better approach would be to use a proper serialization library.
-    posts_dict = [{"post_id": str(p.post_id), "user_id": str(p.user_id), "content_type": p.content_type, "content_text": p.content_text, "media_url": p.media_url, "tags": p.tags, "geo_tag_lat": p.geo_tag_lat, "geo_tag_long": p.geo_tag_long, "timestamp": p.timestamp.isoformat(), "visibility": p.visibility} for p in posts]
+    # Naive caching: serialize selected fields compatible with current schema
+    posts_dict = [{
+        "post_id": str(p.post_id),
+        "user_id": str(p.user_id),
+        "post_type": p.post_type,
+        "content_text": p.content_text,
+        "media_url": p.media_url,
+        "tags": p.tags,
+        "timestamp": p.timestamp.isoformat(),
+        "visibility": p.visibility,
+        "location_id": str(p.location_id) if p.location_id else None,
+        "boost_score": p.boost_score,
+    } for p in posts]
     r.set(f"global_feed:{skip}:{limit}", json.dumps(posts_dict), ex=30) # Cache for 30 seconds
     return posts
 
@@ -47,4 +58,3 @@ def delete_post(post_id: uuid.UUID, db: Session = Depends(get_db), current_user:
     db.delete(post)
     db.commit()
     return
-

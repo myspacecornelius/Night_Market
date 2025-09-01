@@ -1,6 +1,7 @@
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from uuid import UUID
 
 from backend.models import user as user_models
 from backend.models import laces as laces_models
@@ -11,17 +12,17 @@ BOOST_COST = 10 # Example: 10 Laces per boost
 
 def boost_post(
     db: Session,
-    post_id: int,
-    user_id: int,
+    post_id: UUID,
+    user_id: UUID,
 ):
-    user = db.query(user_models.User).filter(user_models.User.id == user_id).first()
+    user = db.query(user_models.User).filter(user_models.User.user_id == user_id).first()
     if not user:
         raise ValueError("User not found")
 
     if user.laces_balance < BOOST_COST:
         raise ValueError("Insufficient Laces balance")
 
-    post = db.query(post_models.Post).filter(post_models.Post.id == post_id).first()
+    post = db.query(post_models.Post).filter(post_models.Post.post_id == post_id).first()
     if not post:
         raise ValueError("Post not found")
 
@@ -31,9 +32,9 @@ def boost_post(
     # Record the transaction in the LacesLedger
     ledger_entry = laces_models.LacesLedger(
         user_id=user_id,
-        post_id=post_id,
+        related_post_id=post_id,
         amount=-BOOST_COST, # Negative for deduction
-        transaction_type="boost",
+        transaction_type="BOOST_SENT",
     )
     db.add(ledger_entry)
 

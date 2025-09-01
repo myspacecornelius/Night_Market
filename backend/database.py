@@ -1,16 +1,6 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+"""
+Compat shim: re-export database primitives from backend.core.database
+to keep models importing Base from backend.database consistent.
+"""
 
-DATABASE_URL = "postgresql://user:password@localhost/dbname"  # Update with your actual database URL
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from backend.core.database import engine, SessionLocal, Base, get_db  # noqa: F401

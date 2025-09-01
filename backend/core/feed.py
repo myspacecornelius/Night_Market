@@ -20,16 +20,16 @@ def get_hyperlocal_feed(
     radius_meters = radius * 1000
 
     # Query for posts within the specified radius of the user's location
-    # Order by boost_score (descending) and then by creation_date (descending)
+    # Order by boost_score (descending) and then by timestamp (descending)
     posts = (
         db.query(post_models.Post)
-        .join(location_models.Location)
+        .join(location_models.Location, location_models.Location.id == post_models.Post.location_id)
         .filter(
             func.ST_DWithin(
-                location_models.Location.geopoint, user_point, radius_meters
+                location_models.Location.point, user_point, radius_meters
             )
         )
-        .order_by(desc(post_models.Post.boost_score), desc(post_models.Post.created_date))
+        .order_by(desc(post_models.Post.boost_score), desc(post_models.Post.timestamp))
         .limit(limit)
         .all()
     )
