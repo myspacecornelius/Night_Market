@@ -131,6 +131,9 @@ Prometheus configs:
 - Dharma: `infra/prometheus.yml`
 - Microservices: `infra/prometheus.services.yml`
 
+Wiring microservice metrics into the main Prometheus:
+- Main Prometheus (`infra/prometheus.yml`) scrapes microservices via published host ports using `host.docker.internal` (Docker Desktop). If on Linux, replace with your Docker bridge gateway (often `172.17.0.1`) or add an `extra_hosts` entry to Prometheus service in `docker-compose.yml`.
+
 ## Redis Tips
 Connect to Redis inside the Dharma network:
 ```
@@ -150,6 +153,85 @@ Useful keys/channels:
   - POST `/api/monitors` with JSON `{ sku, retailer, interval_ms, ... }`
 - Queue Checkout Tasks:
   - POST `/api/checkout/tasks/batch` with profiles/payments
+
+## Example cURL Requests
+
+Auth/session (Dharma backend):
+```
+curl -sX POST http://localhost:8000/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo","password":"secret"}'
+```
+
+Health and metrics (Dharma):
+```
+curl -s http://localhost:8000/health
+curl -s http://localhost:8000/metrics | head
+```
+
+Create hyperlocal signal (Dharma):
+```
+TOKEN="$(your_token_here)"
+curl -sX POST 'http://localhost:8000/v1/signals' \
+  -H 'Authorization: Bearer '"$TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "post_type":"GENERAL",
+    "content_text":"Line moving at Concepts",
+    "tags":["boston","jordan"],
+    "geo_tag_lat":42.362,
+    "geo_tag_long":-71.057,
+    "visibility":"public"
+  }'
+```
+
+Scan hyperlocal feed (Dharma):
+```
+curl -s 'http://localhost:8000/v1/feed/scan?latitude=42.36&longitude=-71.06&radius=1.0' \
+  -H 'Authorization: Bearer '"$TOKEN"
+```
+
+Create session (Microservices API Gateway):
+```
+curl -sX POST http://localhost:8001/api/auth/session \
+  -H 'Content-Type: application/json' \
+  -d '{"api_key":"dev-api-key-123","device_id":"dev-machine"}'
+```
+
+Create a monitor (Microservices API Gateway):
+```
+TOKEN_MS="$(your_micro_token_here)"
+curl -sX POST http://localhost:8001/api/monitors \
+  -H 'Authorization: Bearer '"$TOKEN_MS" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sku":"FD6475-001",
+    "retailer":"shopify",
+    "interval_ms":200,
+    "keywords":["jordan","travis"]
+  }'
+```
+
+Create checkout task batch (Microservices API Gateway):
+```
+curl -sX POST http://localhost:8001/api/checkout/tasks/batch \
+  -H 'Authorization: Bearer '"$TOKEN_MS" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "count": 3,
+    "monitor_id": "YOUR_MONITOR_ID",
+    "profile_ids": ["profile-1","profile-2","profile-3"],
+    "payment_ids": ["payment-1","payment-2","payment-3"],
+    "mode": "request",
+    "stagger_ms": 100
+  }'
+```
+
+Metrics (Microservices):
+```
+curl -s http://localhost:8001/metrics | head    # API Gateway
+curl -s http://localhost:8002/metrics | head    # Proxy metrics
+```
 
 ## Data Flow (high level)
 ```

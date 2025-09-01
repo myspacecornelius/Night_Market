@@ -12,7 +12,15 @@ scrape_configs:
       - targets: ['api:8000']
     metrics_path: /metrics
 
-  - job_name: 'monitor-service'
+  # Microservices scraped via published host ports
+  # Note: On macOS/Windows with Docker Desktop, host.docker.internal resolves from containers.
+  # On Linux, replace with the Docker bridge gateway (often 172.17.0.1) or add extra_hosts.
+  - job_name: 'micro-api-gateway'
     static_configs:
-      - targets: ['monitor:8001']
+      - targets: ['host.docker.internal:8001']
+    metrics_path: /metrics
+
+  - job_name: 'proxy-metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8002']
     metrics_path: /metrics
