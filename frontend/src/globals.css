@@ -4,67 +4,67 @@
 
 @layer base {
   :root {
-    /* Night Market Modern - Light Mode (Bone base) */
-    --background: 0 0% 96.5%; /* Bone #F6F6F6 */
-    --foreground: 240 9% 4%; /* Ink #0B0B0C */
+    /* Dharma Earthy Sophistication - Light Mode */
+    --background: 43 33 19; /* earth-50: warm linen */
+    --foreground: 45 27 6; /* earth-900: rich soil */
  
-    --card: 0 0% 100%;
-    --card-foreground: 240 9% 4%;
+    --card: 0 0% 100%; /* Pure white cards */
+    --card-foreground: 45 27 6;
  
     --popover: 0 0% 100%;
-    --popover-foreground: 240 9% 4%;
+    --popover-foreground: 45 27 6;
  
-    --primary: 4 79% 57%; /* Heat #E94A3D */
-    --primary-foreground: 0 0% 96.5%;
+    --primary: 35 61 25; /* earth-500: rich ochre */
+    --primary-foreground: 250 248 245;
  
-    --secondary: 220 13% 91%;
-    --secondary-foreground: 240 9% 4%;
+    --secondary: 28 17 49; /* earth-200: light sand */
+    --secondary-foreground: 107 68 35; /* earth-700 */
  
-    --muted: 220 13% 91%;
-    --muted-foreground: 215 16% 47%; /* Steel #717784 */
+    --muted: 39 31 21; /* earth-100: cream */
+    --muted-foreground: 39 9 9; /* stone-500: sophisticated gray */
  
-    --accent: 120 100% 88%; /* Neon hint #C3FFD0 */
-    --accent-foreground: 240 9% 4%;
+    --accent: 104 24 20; /* sage-500: deep sage */
+    --accent-foreground: 247 249 247;
  
-    --destructive: 4 79% 57%;
-    --destructive-foreground: 0 0% 96.5%;
+    --destructive: 0 72% 51%; /* Earthy red for warnings */
+    --destructive-foreground: 254 242 242;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 4 79% 57%;
+    --border: 0 0% 90%; /* Subtle stone borders */
+    --input: 0 0% 97%; /* Very light input backgrounds */
+    --ring: 35 61 25; /* earth-500 for focus rings */
  
     --radius: 0.75rem;
   }
  
   .dark {
-    /* Night Market Modern - Dark Mode (Ink base) */
-    --background: 240 9% 4%; /* Ink #0B0B0C */
-    --foreground: 0 0% 96.5%; /* Bone #F6F6F6 */
+    /* Dharma Earthy Sophistication - Dark Mode */
+    --background: 45 27 6; /* earth-900: rich soil */
+    --foreground: 43 33 19; /* earth-50: warm linen */
  
-    --card: 240 6% 8%;
-    --card-foreground: 0 0% 96.5%;
+    --card: 74 44 10; /* earth-800: dark chocolate */
+    --card-foreground: 250 248 247;
  
-    --popover: 240 6% 8%;
-    --popover-foreground: 0 0% 96.5%;
+    --popover: 74 44 10;
+    --popover-foreground: 250 248 247;
  
-    --primary: 4 79% 57%; /* Heat #E94A3D */
-    --primary-foreground: 0 0% 96.5%;
+    --primary: 35 61 25; /* earth-500: rich ochre */
+    --primary-foreground: 45 27 6;
  
-    --secondary: 240 6% 12%;
-    --secondary-foreground: 0 0% 96.5%;
+    --secondary: 107 68 35; /* earth-700: coffee brown */
+    --secondary-foreground: 244 241 235;
  
-    --muted: 240 6% 12%;
-    --muted-foreground: 215 16% 47%; /* Steel #717784 */
+    --muted: 107 68 35;
+    --muted-foreground: 39 9 9; /* stone-400 */
  
-    --accent: 120 100% 88%; /* Neon hint #C3FFD0 */
-    --accent-foreground: 240 9% 4%;
+    --accent: 104 24 20; /* sage-500: deep sage */
+    --accent-foreground: 15 26 15;
  
-    --destructive: 4 79% 57%;
-    --destructive-foreground: 0 0% 96.5%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 254 242 242;
  
-    --border: 240 6% 12%;
-    --input: 240 6% 12%;
-    --ring: 4 79% 57%;
+    --border: 0 0% 25%; /* stone-700 */
+    --input: 0 0% 20%; /* stone-800 */
+    --ring: 35 61 25;
   }
 }
  
@@ -73,84 +73,172 @@
     @apply border-border;
   }
   
+  html {
+    scroll-behavior: smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  
   body {
-    @apply bg-background text-foreground font-humanist;
+    @apply bg-gradient-earth text-foreground font-body;
+    @apply transition-colors duration-500;
     font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+  }
+  
+  .dark body {
+    @apply bg-gradient-to-br from-earth-900 to-stone-900;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    @apply font-grotesk font-semibold tracking-tight;
+    @apply font-display font-semibold tracking-tight;
+    @apply text-balance;
   }
   
-  /* Smooth scrolling */
-  html {
-    scroll-behavior: smooth;
+  /* Enhanced scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2;
   }
   
-  /* Focus styles */
+  ::-webkit-scrollbar-track {
+    @apply bg-earth-100 dark:bg-earth-800;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-earth-300 dark:bg-earth-600 rounded-full;
+    @apply hover:bg-earth-400 dark:hover:bg-earth-500;
+    @apply transition-colors duration-300;
+  }
+  
+  /* Enhanced focus styles */
   *:focus-visible {
-    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+    @apply outline-none ring-2 ring-earth-500/30 ring-offset-2 ring-offset-background;
+    @apply transition-all duration-200;
   }
   
-  /* Selection styles */
+  /* Sophisticated selection styles */
   ::selection {
-    @apply bg-heat/20 text-foreground;
+    @apply bg-earth-500/15 text-earth-900;
+  }
+  
+  .dark ::selection {
+    @apply bg-earth-400/20 text-earth-50;
   }
 }
 
 @layer components {
-  /* Glass morphism utility */
-  .glass {
-    @apply backdrop-blur-md bg-background/80 border border-border/50;
+  /* Sophisticated magnetic interactions */
+  .magnetic {
+    @apply transition-all duration-200 ease-magnetic cursor-pointer;
+    transform-origin: center;
   }
   
-  /* Heat glow effect */
-  .heat-glow {
-    @apply shadow-heat;
+  .magnetic:hover {
+    @apply scale-105 -translate-y-1;
+    @apply shadow-glow;
   }
   
-  /* Neon glow effect */
-  .neon-glow {
-    @apply shadow-neon;
+  /* Advanced glassmorphism */
+  .glass-card {
+    @apply backdrop-blur-md bg-white/90 dark:bg-earth-800/90;
+    @apply border border-earth-200/50 dark:border-earth-700/50;
+    @apply shadow-medium;
+    @apply transition-all duration-400;
   }
   
-  /* Container utilities */
-  .container-narrow {
-    @apply container max-w-2xl;
+  .glass-card:hover {
+    @apply bg-white/95 dark:bg-earth-800/95;
+    @apply shadow-hard;
+    @apply border-earth-300/60 dark:border-earth-600/60;
+    @apply backdrop-blur-lg;
   }
   
-  .container-wide {
-    @apply container max-w-7xl;
+  /* Sophisticated button system */
+  .btn-earth {
+    @apply relative overflow-hidden;
+    @apply bg-earth-500 hover:bg-earth-600 text-earth-50;
+    @apply transition-all duration-300 ease-smooth;
+    @apply shadow-soft hover:shadow-glow;
+    @apply px-6 py-3 rounded-xl font-medium;
   }
   
-  /* Button base styles */
-  .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  .btn-earth::before {
+    @apply absolute inset-0;
+    @apply bg-gradient-to-r from-transparent via-white/10 to-transparent;
+    @apply translate-x-[-100%] transition-transform duration-500;
+    content: '';
   }
   
-  .btn-primary {
-    @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm;
+  .btn-earth:hover::before {
+    @apply translate-x-[100%];
   }
   
-  .btn-secondary {
-    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border;
+  .btn-sage {
+    @apply relative overflow-hidden;
+    @apply bg-sage-500 hover:bg-sage-600 text-sage-50;
+    @apply transition-all duration-300 ease-smooth;
+    @apply shadow-soft hover:shadow-glow-sage;
+    @apply px-6 py-3 rounded-xl font-medium;
   }
   
-  .btn-ghost {
-    @apply hover:bg-accent hover:text-accent-foreground;
+  .btn-sage::before {
+    @apply absolute inset-0;
+    @apply bg-gradient-to-r from-transparent via-white/10 to-transparent;
+    @apply translate-x-[-100%] transition-transform duration-500;
+    content: '';
   }
   
-  .btn-heat {
-    @apply bg-heat text-bone hover:bg-heat/90 heat-glow;
+  .btn-sage:hover::before {
+    @apply translate-x-[100%];
   }
   
-  /* Card styles */
-  .card {
-    @apply rounded-lg border border-border bg-card text-card-foreground shadow-soft;
+  /* Premium card styles */
+  .card-premium {
+    @apply glass-card rounded-2xl p-6;
+    @apply hover:shadow-neumorphic;
+    @apply transform transition-all duration-400;
   }
   
-  .card-glass {
-    @apply glass rounded-lg shadow-glass;
+  .card-premium:hover {
+    @apply scale-[1.02] rotate-1;
+  }
+  
+  /* Floating elements with natural motion */
+  .float-gentle {
+    @apply animate-float;
+    animation-delay: var(--delay, 0s);
+  }
+  
+  /* Interactive text gradients */
+  .text-gradient-earth {
+    background: linear-gradient(135deg, #a68b5b 0%, #5a8659 50%, #8b6914 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-size: 200% 100%;
+    transition: background-position 0.3s ease;
+  }
+  
+  .text-gradient-earth:hover {
+    background-position: 100% 0;
+  }
+  
+  /* Sophisticated navigation */
+  .nav-item {
+    @apply relative px-4 py-2 rounded-lg;
+    @apply transition-all duration-300;
+    @apply hover:bg-earth-100 dark:hover:bg-earth-800;
+  }
+  
+  .nav-item::after {
+    @apply absolute bottom-0 left-1/2 w-0 h-0.5;
+    @apply bg-earth-500 transition-all duration-300;
+    @apply -translate-x-1/2;
+    content: '';
+  }
+  
+  .nav-item:hover::after,
+  .nav-item.active::after {
+    @apply w-3/4;
   }
 }
 

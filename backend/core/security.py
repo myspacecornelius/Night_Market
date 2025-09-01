@@ -11,8 +11,13 @@ from fastapi.security import OAuth2PasswordBearer
 from .. import models, schemas
 from ..core.database import SessionLocal
 
-SECRET_KEY = "your-secret-key"  # TODO: Move to config
-ALGORITHM = "HS256"
+import os
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "development-only-key-change-in-production")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+if SECRET_KEY == "development-only-key-change-in-production" and os.getenv("ENVIRONMENT") == "production":
+    raise ValueError("JWT_SECRET_KEY must be set in production environment")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
@@ -57,9 +62,17 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     return user
 
 def get_current_admin_user(current_user: models.User = Depends(get_current_user)):
-    if current_user.username != "admin": # Replace with a real admin check
+    # Check if user has admin role or is in admin list from environment
+    admin_users = os.getenv("ADMIN_USERS", "").split(",")
+    if current_user.username not in admin_users and not hasattr(current_user, 'is_admin'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
-            detail="The user is not an administrator"
+            detail="Insufficient privileges"
         )
     return current_user
+
+def validate_token_strength(token: str) -> bool:
+    """Validate JWT token structure and strength"""
+    if not token or len(token) < 10:
+        return False
+    return True

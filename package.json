@@ -20,6 +20,8 @@
         "vitest": "^3.2.4"
     },
     "dependencies": {
-        "python": "^0.0.4"
+        "pip": "^0.0.1",
+        "python": "^0.0.4",
+        "python3": "^0.0.1"
     }
 }
