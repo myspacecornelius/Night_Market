@@ -16,7 +16,7 @@ load_dotenv()
 # auto-upgrade it to postgresql+psycopg:// so SQLAlchemy uses the modern driver.
 raw_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/dharma")
 if raw_url.startswith("postgresql://") and "+" not in raw_url:
-    DATABASE_URL = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    DATABASE_URL = raw_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 else:
     DATABASE_URL = raw_url
 

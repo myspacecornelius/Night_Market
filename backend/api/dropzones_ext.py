@@ -65,7 +65,7 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     r = 6371000  # Radius of earth in meters
     return c * r
 
-@router.post("/dropzones", response_model=DropZoneResponse)
+@router.post("/v1/dropzones", response_model=DropZoneResponse)
 async def create_dropzone(
     dropzone_data: DropZoneCreate,
     db: Session = Depends(get_db)
@@ -130,7 +130,7 @@ async def create_dropzone(
         created_at=dropzone.created_at
     )
 
-@router.get("/dropzones", response_model=List[DropZoneResponse])
+@router.get("/v1/dropzones", response_model=List[DropZoneResponse])
 async def list_dropzones(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
     active: Optional[bool] = Query(None, description="Filter by active status"),
@@ -209,7 +209,7 @@ async def list_dropzones(
     
     return results
 
-@router.post("/dropzones/{dropzone_id}/checkin")
+@router.post("/v1/dropzones/{dropzone_id}/checkin")
 async def check_in_to_dropzone(
     dropzone_id: UUID4,
     check_in_data: CheckInRequest,
@@ -320,7 +320,7 @@ async def check_in_to_dropzone(
         "message": f"Successfully checked in! Streak: {streak_count}, Points: {total_points}"
     }
 
-@router.get("/dropzones/{dropzone_id}")
+@router.get("/v1/dropzones/{dropzone_id}")
 async def get_dropzone_details(
     dropzone_id: UUID4,
     db: Session = Depends(get_db)
@@ -390,7 +390,7 @@ async def get_dropzone_details(
         ]
     }
 
-@router.post("/dropzones/{dropzone_id}/join")
+@router.post("/v1/dropzones/{dropzone_id}/join")
 async def join_dropzone(
     dropzone_id: UUID4,
     db: Session = Depends(get_db)
