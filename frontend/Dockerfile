@@ -7,8 +7,10 @@ WORKDIR /app
 # Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
 
-# Install any needed packages
-RUN npm install
+# Install dependencies deterministically from lockfile, then pin+rebuild esbuild
+RUN npm ci \
+    && npm install -D esbuild@0.25.9 \
+    && npm rebuild esbuild
 
 # Bundle app source
 COPY . .

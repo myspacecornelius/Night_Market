@@ -46,7 +46,7 @@ interface Opportunities {
   checkins_today: number;
 }
 
-export default function Laces() {
+export default function LacesPage() {
   const queryClient = useQueryClient();
 
   // Fetch balance data

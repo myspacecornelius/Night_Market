@@ -7,7 +7,7 @@ python-multipart==0.0.7
 python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 bcrypt==3.2.0
-starlette==0.40.0
+starlette>=0.35.1,<0.36.0
 
 # Database
 sqlalchemy==2.0.25
