@@ -1,7 +1,7 @@
 
 from typing import Optional
 
-from pydantic import BaseModel, UUID4
+from pydantic import BaseModel, UUID4, ConfigDict
 
 class LikeBase(BaseModel):
     user_id: UUID4
@@ -12,9 +12,7 @@ class LikeCreate(LikeBase):
 
 class Like(LikeBase):
     like_id: UUID4
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SaveBase(BaseModel):
     user_id: UUID4
@@ -26,9 +24,7 @@ class SaveCreate(SaveBase):
 
 class Save(SaveBase):
     save_id: UUID4
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RepostBase(BaseModel):
     user_id: UUID4
@@ -39,6 +35,4 @@ class RepostCreate(RepostBase):
 
 class Repost(RepostBase):
     repost_id: UUID4
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

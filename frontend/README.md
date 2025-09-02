@@ -1,11 +1,24 @@
-# React + TypeScript + Vite
+# Dharma Frontend (Vite + React + TS)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This app uses Vite with React and TypeScript. Tailwind CSS and shadcn-style primitives are configured, with path aliases via `vite-tsconfig-paths`.
 
-Currently, two official plugins are available:
+## Import Conventions
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Path aliases are enabled via `vite-tsconfig-paths` and `tsconfig.app.json` (`@/*` → `src/*`). Prefer absolute imports using the alias to avoid brittle relative paths and duplicate modules.
+
+- Use `@/…` for all imports from `src`
+- Prefer lowercase component filenames and imports (e.g., `@/components/ui/button`)
+- For compatibility, both `@/components/ui/button` and `@/components/ui/Button` currently exist, but new code should import from the lowercase path
+
+Examples:
+
+```ts
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { designTokens } from '@/lib/design-tokens'
+```
+
+Rationale: This keeps imports consistent across the app and prevents divergence like `Button` vs `button` components. The alias is active in `vite.config.ts` and set in `tsconfig.app.json`.
 
 ## Expanding the ESLint configuration
 

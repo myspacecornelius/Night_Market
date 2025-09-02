@@ -1,5 +1,5 @@
 
-import type { ColumnDef, SortingState } from '@tanstack/react-table'; // Updated to type-only imports
+import type { ColumnDef, SortingState } from '@tanstack/react-table';
 import {
     flexRender,
     getCoreRowModel,
@@ -32,6 +32,12 @@ const StatusCell: React.FC<{ status: Item['status'] }> = ({ status }) => {
 
 export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowClick }) => {
     const [sorting, setSorting] = React.useState<SortingState>([]);
+    const [error, setError] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        // Example of setting an error
+        // setError("Failed to load data."); // Uncomment to simulate an error
+    }, []);
 
     const columns = useMemo<ColumnDef<Item>[]>(
         () => [
@@ -99,6 +105,12 @@ export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowCli
         state: { sorting },
         onSortingChange: setSorting,
         getCoreRowModel: getCoreRowModel(),
+    const table = useReactTable({
+        data: items,
+        columns,
+        state: { sorting },
+        onSortingChange: setSorting,
+        getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
     });
 
@@ -113,7 +125,20 @@ export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowCli
                     {table.getHeaderGroups().map((headerGroup) => (
                         <tr key={headerGroup.id}>
                             {headerGroup.headers.map((header) => (
-                                <th key={header.id} scope="col" className="px-6 py-3">
+                                <th
+                                    key={header.id}
+                                    scope="col"
+                                    className="px-6 py-3"
+                                    aria-sort={
+                                        header.column.getCanSort()
+                                            ? (header.column.getIsSorted() === 'asc'
+                                                ? 'ascending'
+                                                : header.column.getIsSorted() === 'desc'
+                                                    ? 'descending'
+                                                    : 'none')
+                                            : undefined
+                                    }
+                                >
                                     {header.isPlaceholder
                                         ? null
                                         : flexRender(header.column.columnDef.header, header.getContext())}
@@ -158,14 +183,12 @@ export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowCli
 const ItemTableSkeleton: React.FC = () => {
     return (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
-            <div className="flex items-center justify-center h-full">
-                <div className="animate-spin h-5 w-5 border-4 border-t-transparent border-blue-500 rounded-full"></div> {/* Added spinner */}
-                <span className="ml-2">Loading...</span> {/* Loading text */}
-                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-full mb-4"></div>
+            <div className="space-y-4">
+                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
                 {Array.from({ length: 10 }).map((_, i) => (
-                    <div key={i} className="h-10 bg-gray-200 dark:bg-gray-700 rounded w-full mb-2"></div>
+                    <div key={i} className="h-10 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
                 ))}
             </div>
-        </div >
+        </div>
     );
 };

@@ -1,6 +1,6 @@
 """
-SneakerSniper Celery Tasks
-Background task processing for the bot engine
+Night Market Celery Tasks
+Background task processing for the Dharma application
 """
 
 from celery import Celery, Task
@@ -12,9 +12,10 @@ import httpx
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import asyncio
+import os
 
 # Initialize Celery
-app = Celery('sneakersniper')
+app = Celery('dharma')
 app.config_from_object('celeryconfig')
 
 # Get logger
@@ -301,23 +302,244 @@ def cleanup_old_data() -> Dict[str, Any]:
         logger.error(f"Cleanup failed: {e}")
         raise
 
+# New Dharma tasks
+@app.task(bind=True)
+def refresh_heatmap_cache(self, zones: Optional[list] = None) -> Dict[str, Any]:
+    """
+    Refresh heatmap cache tiles
+    Can target specific geohash zones or refresh globally
+    """
+    try:
+        logger.info("Starting heatmap cache refresh")
+        
+        # Clear existing cache
+        cache_keys_cleared = 0
+        pattern = "heatmap:*"
+        
+        # If specific zones provided, target those
+        if zones:
+            for zone in zones:
+                zone_pattern = f"heatmap:*:{zone}*"
+                zone_keys = redis_client.keys(zone_pattern)
+                if zone_keys:
+                    redis_client.delete(*zone_keys)
+                    cache_keys_cleared += len(zone_keys)
+        else:
+            # Clear all heatmap cache
+            all_keys = redis_client.keys(pattern)
+            if all_keys:
+                redis_client.delete(*all_keys)
+                cache_keys_cleared = len(all_keys)
+        
+        # Pre-warm cache for common zoom levels and time windows
+        api_url = os.getenv("API_BASE_URL", "http://api:8000")
+        zoom_levels = [6, 7, 8]
+        time_windows = ["1h", "24h", "7d"]
+        
+        warmed_tiles = 0
+        
+        with httpx.Client(timeout=30) as client:
+            for zoom in zoom_levels:
+                for window in time_windows:
+                    try:
+                        response = client.get(
+                            f"{api_url}/v1/heatmap",
+                            params={"zoom": zoom, "window": window}
+                        )
+                        if response.status_code == 200:
+                            warmed_tiles += 1
+                            logger.info(f"Warmed heatmap tile zoom={zoom} window={window}")
+                    except Exception as e:
+                        logger.warning(f"Failed to warm tile zoom={zoom} window={window}: {e}")
+        
+        return {
+            'success': True,
+            'cache_keys_cleared': cache_keys_cleared,
+            'tiles_warmed': warmed_tiles,
+            'zones_targeted': zones or 'all',
+            'refreshed_at': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Heatmap refresh failed: {e}")
+        self.retry(exc=e, countdown=60, max_retries=3)
+
+@app.task
+def process_new_post(post_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process new post creation and invalidate relevant cache
+    """
+    try:
+        post_location = post_data.get('location', {})
+        lat = post_location.get('lat')
+        lng = post_location.get('lng')
+        
+        if lat and lng:
+            # Calculate affected geohash zones for cache invalidation
+            import geohash2
+            affected_zones = []
+            
+            # Get geohashes at different precisions
+            for precision in [6, 7, 8]:
+                zone = geohash2.encode(lat, lng, precision)
+                affected_zones.append(zone)
+            
+            # Trigger targeted cache refresh
+            refresh_heatmap_cache.delay(zones=affected_zones)
+            
+            logger.info(f"Triggered heatmap refresh for zones: {affected_zones}")
+        
+        return {
+            'post_id': post_data.get('post_id'),
+            'zones_invalidated': affected_zones if lat and lng else [],
+            'processed_at': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Post processing failed: {e}")
+        raise
+
+@app.task
+def daily_laces_stipend() -> Dict[str, Any]:
+    """
+    Distribute daily LACES stipend to active users who haven't claimed it
+    """
+    try:
+        import sys
+        sys.path.append('/app')
+        
+        from sqlalchemy import create_engine, func, and_
+        from sqlalchemy.orm import sessionmaker
+        from backend.models.user import User
+        from backend.models.laces import LacesLedger
+        from backend.models.post import Post
+        from backend.models.dropzone import DropZoneCheckIn
+        
+        # Get database connection
+        database_url = os.getenv("DATABASE_URL")
+        engine = create_engine(database_url)
+        Session = sessionmaker(bind=engine)
+        
+        with Session() as db:
+            logger.info("Starting daily LACES stipend distribution")
+            
+            today = datetime.now().date()
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            
+            # Query active users (posted or checked-in in last 7 days)
+            # who haven't claimed today's stipend yet
+            users_with_recent_activity = db.query(User.user_id).filter(
+                User.user_id.in_(
+                    # Users with recent posts
+                    db.query(Post.user_id).filter(Post.timestamp >= seven_days_ago).union(
+                        # Users with recent check-ins
+                        db.query(DropZoneCheckIn.user_id).filter(DropZoneCheckIn.checked_in_at >= seven_days_ago)
+                    )
+                )
+            ).subquery()
+            
+            # Find users who haven't claimed stipend today
+            users_without_stipend = db.query(User).filter(
+                and_(
+                    User.user_id.in_(users_with_recent_activity),
+                    ~db.query(LacesLedger).filter(
+                        and_(
+                            LacesLedger.user_id == User.user_id,
+                            LacesLedger.transaction_type == 'DAILY_STIPEND',
+                            func.date(LacesLedger.created_at) == today
+                        )
+                    ).exists()
+                )
+            ).all()
+            
+            stipends_distributed = 0
+            daily_stipend_amount = 100
+            
+            for user in users_without_stipend:
+                try:
+                    # Create ledger entry
+                    ledger_entry = LacesLedger(
+                        user_id=user.user_id,
+                        amount=daily_stipend_amount,
+                        transaction_type='DAILY_STIPEND'
+                    )
+                    db.add(ledger_entry)
+                    
+                    # Update user balance
+                    user.laces_balance += daily_stipend_amount
+                    
+                    stipends_distributed += 1
+                    
+                except Exception as e:
+                    logger.error(f"Failed to distribute stipend to user {user.user_id}: {e}")
+                    continue
+            
+            # Commit all changes
+            db.commit()
+            
+            logger.info(f"Distributed daily stipend to {stipends_distributed} users")
+            
+            return {
+                'stipends_distributed': stipends_distributed,
+                'amount_per_user': daily_stipend_amount,
+                'total_distributed': stipends_distributed * daily_stipend_amount,
+                'distributed_at': datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Daily stipend failed: {e}")
+        raise
+
+@app.task
+def manage_dropzone_windows() -> Dict[str, Any]:
+    """
+    Open/close dropzone windows based on schedule
+    """
+    try:
+        logger.info("Managing dropzone windows")
+        
+        # TODO: Query dropzones with scheduled windows
+        # TODO: Open zones that should be active now
+        # TODO: Close zones past their end time
+        # TODO: Send notifications for zone status changes
+        
+        zones_opened = 0
+        zones_closed = 0
+        
+        return {
+            'zones_opened': zones_opened,
+            'zones_closed': zones_closed,
+            'managed_at': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Dropzone management failed: {e}")
+        raise
+
 # Scheduled tasks
 @app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     """Configure periodic tasks"""
     
-    # Rotate proxies every 5 minutes
+    # Refresh heatmap cache every 5 minutes
     sender.add_periodic_task(
         300.0,
-        rotate_proxies.s(),
-        name='Rotate proxy pool'
+        refresh_heatmap_cache.s(),
+        name='Refresh heatmap cache'
     )
     
-    # Analyze performance every 15 minutes
+    # Daily LACES stipend at midnight UTC
     sender.add_periodic_task(
-        900.0,
-        analyze_checkout_performance.s(),
-        name='Analyze checkout performance'
+        86400.0,
+        daily_laces_stipend.s(),
+        name='Daily LACES stipend'
+    )
+    
+    # Manage dropzone windows every minute
+    sender.add_periodic_task(
+        60.0,
+        manage_dropzone_windows.s(),
+        name='Manage dropzone windows'
     )
     
     # Clean up old data daily

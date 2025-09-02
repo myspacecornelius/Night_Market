@@ -1,10 +1,10 @@
 # Copy .env.example -> .env before running. .env is required for runtime.
+name: dharma
 services:
   postgres:
     platform: linux/amd64
     image: postgis/postgis:15-3.4
-    ports:
-      - "5432:5432"
+    # No host port published; access via service name on network
     env_file:
       - .env
     volumes:
@@ -19,8 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No host port published; access via service name on network
     volumes:
       - redis_data:/data
     healthcheck:
@@ -111,7 +110,14 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - ENVIRONMENT=${ENVIRONMENT}
-    command: celery -A tasks.app worker --loglevel=info
+    # Use correct Celery app path (module:function)
+    command: celery -A tasks:app worker --loglevel=info
+    healthcheck:
+      # Verify Redis connectivity which the worker depends on
+      test: [ "CMD-SHELL", "python - <<'PY'\nimport os, sys\nimport redis\nurl=os.environ.get('REDIS_URL','redis://redis:6379/0')\ntry:\n    redis.from_url(url).ping(); sys.exit(0)\nexcept Exception as e:\n    print(e); sys.exit(1)\nPY" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -136,7 +142,14 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - ENVIRONMENT=${ENVIRONMENT}
-    command: celery -A tasks.app beat --loglevel=info
+    # Use correct Celery app path (module:function)
+    command: celery -A tasks:app beat --loglevel=info
+    healthcheck:
+      # Verify Redis connectivity which beat depends on
+      test: [ "CMD-SHELL", "python - <<'PY'\nimport os, sys\nimport redis\nurl=os.environ.get('REDIS_URL','redis://redis:6379/0')\ntry:\n    redis.from_url(url).ping(); sys.exit(0)\nexcept Exception as e:\n    print(e); sys.exit(1)\nPY" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
     depends_on:
       seed:
         condition: service_completed_successfully

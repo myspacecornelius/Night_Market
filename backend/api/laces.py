@@ -1,260 +1,385 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy import func, and_, desc
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from pydantic import BaseModel, UUID4
+import uuid
 
-from .. import models, schemas
-from ..core.database import get_db
-from ..core.security import get_current_user, get_current_admin_user
+from backend.database import get_db
+from backend.models.laces import LacesLedger as LacesLedgerModel
+from backend.models.user import User
+from backend.models.post import Post
+from backend.models.dropzone import DropZoneCheckIn
 
-router = APIRouter(prefix="/laces", tags=["laces"])
+router = APIRouter()
 
-@router.get("/balance", response_model=schemas.LacesBalance)
+# Pydantic models
+class LacesBalance(BaseModel):
+    balance: int
+    user_id: UUID4
+    last_stipend: Optional[datetime]
+    total_earned: int
+    total_spent: int
+
+class LacesTransaction(BaseModel):
+    id: UUID4
+    amount: int
+    transaction_type: str
+    related_post_id: Optional[UUID4]
+    created_at: datetime
+    description: Optional[str]
+
+class LacesLedger(BaseModel):
+    transactions: List[LacesTransaction]
+    total_count: int
+    page: int
+    limit: int
+
+class GrantLacesRequest(BaseModel):
+    user_id: UUID4
+    amount: int
+    transaction_type: str
+    related_post_id: Optional[UUID4] = None
+    description: Optional[str] = None
+
+# Service functions
+async def grant_laces(
+    db: Session,
+    user_id: UUID4,
+    amount: int,
+    transaction_type: str,
+    related_post_id: Optional[UUID4] = None,
+    description: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Grant LACES tokens to a user and update their balance
+    """
+    # Verify user exists
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Create ledger entry
+    ledger_entry = LacesLedgerModel(
+        user_id=user_id,
+        amount=amount,
+        transaction_type=transaction_type,
+        related_post_id=related_post_id
+    )
+    
+    db.add(ledger_entry)
+    
+    # Update user balance
+    user.laces_balance += amount
+    
+    # Ensure balance doesn't go negative
+    if user.laces_balance < 0:
+        user.laces_balance = 0
+    
+    db.commit()
+    db.refresh(ledger_entry)
+    db.refresh(user)
+    
+    return {
+        "transaction_id": ledger_entry.id,
+        "new_balance": user.laces_balance,
+        "amount": amount,
+        "transaction_type": transaction_type
+    }
+
+async def calculate_earning_opportunities(
+    db: Session,
+    user_id: UUID4
+) -> Dict[str, Any]:
+    """
+    Calculate what LACES earning opportunities are available to the user
+    """
+    today = datetime.now().date()
+    
+    # Check if daily stipend already claimed
+    daily_stipend_claimed = db.query(LacesLedgerModel).filter(
+        and_(
+            LacesLedgerModel.user_id == user_id,
+            LacesLedgerModel.transaction_type == 'DAILY_STIPEND',
+            func.date(LacesLedgerModel.created_at) == today
+        )
+    ).first() is not None
+    
+    # Count posts today (for boost opportunities)
+    posts_today = db.query(func.count(Post.post_id)).filter(
+        and_(
+            Post.user_id == user_id,
+            func.date(Post.timestamp) == today
+        )
+    ).scalar()
+    
+    # Count check-ins today
+    checkins_today = db.query(func.count(DropZoneCheckIn.id)).filter(
+        and_(
+            DropZoneCheckIn.user_id == user_id,
+            func.date(DropZoneCheckIn.checked_in_at) == today
+        )
+    ).scalar()
+    
+    opportunities = []
+    
+    if not daily_stipend_claimed:
+        opportunities.append({
+            "type": "daily_stipend",
+            "reward": 100,
+            "description": "Claim your daily LACES stipend"
+        })
+    
+    if posts_today < 5:  # Limit boost posts per day
+        opportunities.append({
+            "type": "helpful_post",
+            "reward": 25,
+            "description": f"Share helpful content ({posts_today}/5 today)"
+        })
+    
+    if checkins_today == 0:
+        opportunities.append({
+            "type": "dropzone_checkin",
+            "reward": "10-30",
+            "description": "Check in to a drop zone (varies by streak)"
+        })
+    
+    return {
+        "opportunities": opportunities,
+        "daily_stipend_claimed": daily_stipend_claimed,
+        "posts_today": posts_today,
+        "checkins_today": checkins_today
+    }
+
+# API Endpoints
+@router.get("/laces/balance", response_model=LacesBalance)
 async def get_laces_balance(
-    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
+    # TODO: Add authentication to get current_user
 ):
-    """Get current user's LACES balance and statistics"""
-    # Calculate derived stats
-    total_earned = db.query(models.LacesLedger).filter(
-        models.LacesLedger.user_id == current_user.user_id,
-        models.LacesLedger.amount > 0
-    ).with_entities(func.coalesce(func.sum(models.LacesLedger.amount), 0)).scalar()
+    """Get current LACES balance for user"""
+    user_id = uuid.uuid4()  # TODO: Get from auth
     
-    total_spent = db.query(models.LacesLedger).filter(
-        models.LacesLedger.user_id == current_user.user_id,
-        models.LacesLedger.amount < 0
-    ).with_entities(func.coalesce(func.sum(models.LacesLedger.amount), 0)).scalar()
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     
-    # Get user rank
-    users_with_higher_balance = db.query(models.User).filter(
-        models.User.laces_balance > current_user.laces_balance
-    ).count()
+    # Get last stipend date
+    last_stipend = db.query(LacesLedgerModel.created_at).filter(
+        and_(
+            LacesLedgerModel.user_id == user_id,
+            LacesLedgerModel.transaction_type == 'DAILY_STIPEND'
+        )
+    ).order_by(desc(LacesLedgerModel.created_at)).first()
     
-    total_users = db.query(models.User).count()
-    percentile = ((total_users - users_with_higher_balance) / total_users) * 100 if total_users > 0 else 0
+    # Calculate totals
+    total_earned = db.query(func.sum(LacesLedgerModel.amount)).filter(
+        and_(
+            LacesLedgerModel.user_id == user_id,
+            LacesLedgerModel.amount > 0
+        )
+    ).scalar() or 0
     
-    return schemas.LacesBalance(
-        user_id=str(current_user.user_id),
-        balance=current_user.laces_balance,
-        lifetime_earned=abs(total_earned),
-        lifetime_spent=abs(total_spent),
-        rank=users_with_higher_balance + 1,
-        percentile=round(percentile, 1)
+    total_spent = db.query(func.sum(LacesLedgerModel.amount)).filter(
+        and_(
+            LacesLedgerModel.user_id == user_id,
+            LacesLedgerModel.amount < 0
+        )
+    ).scalar() or 0
+    
+    return LacesBalance(
+        balance=user.laces_balance,
+        user_id=user.user_id,
+        last_stipend=last_stipend[0] if last_stipend else None,
+        total_earned=total_earned,
+        total_spent=abs(total_spent)
     )
 
-@router.get("/transactions", response_model=List[schemas.LacesTransaction])
-async def get_laces_transactions(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-    transaction_type: Optional[str] = None,
-    current_user: models.User = Depends(get_current_user),
+@router.get("/laces/ledger", response_model=LacesLedger)
+async def get_laces_ledger(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, le=100),
+    transaction_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
+    # TODO: Add authentication
 ):
-    """Get user's LACES transaction history"""
-    query = db.query(models.LacesLedger).filter(
-        models.LacesLedger.user_id == current_user.user_id
-    )
+    """Get LACES transaction history for user"""
+    user_id = uuid.uuid4()  # TODO: Get from auth
+    
+    query = db.query(LacesLedgerModel).filter(LacesLedgerModel.user_id == user_id)
     
     if transaction_type:
-        query = query.filter(models.LacesLedger.transaction_type == transaction_type)
+        query = query.filter(LacesLedgerModel.transaction_type == transaction_type)
     
-    transactions = query.order_by(
-        models.LacesLedger.created_at.desc()
-    ).offset(skip).limit(limit).all()
+    # Get total count for pagination
+    total_count = query.count()
     
-    return [
-        schemas.LacesTransaction(
-            id=str(t.id),
-            user_id=str(t.user_id),
-            amount=t.amount,
-            transaction_type=t.transaction_type,
-            description=t.description,
-            related_post_id=str(t.related_post_id) if t.related_post_id else None,
-            reference_id=t.reference_id,
-            created_at=t.created_at
-        ) for t in transactions
-    ]
-
-@router.get("/leaderboard", response_model=List[schemas.LacesLeaderboardEntry])
-async def get_laces_leaderboard(
-    limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    """Get LACES leaderboard"""
-    top_users = db.query(models.User).order_by(
-        models.User.laces_balance.desc()
-    ).limit(limit).all()
+    # Apply pagination
+    offset = (page - 1) * limit
+    transactions = query.order_by(desc(LacesLedgerModel.created_at)).offset(offset).limit(limit).all()
     
-    return [
-        schemas.LacesLeaderboardEntry(
-            user_id=str(user.user_id),
-            username=user.username,
-            display_name=user.display_name,
-            balance=user.laces_balance,
-            rank=index + 1
-        ) for index, user in enumerate(top_users)
-    ]
-
-@router.post("/transfer")
-async def transfer_laces(
-    transfer_data: schemas.LacesTransfer,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Transfer LACES between users"""
-    # Check if sender has sufficient balance
-    if current_user.laces_balance < transfer_data.amount:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient LACES balance"
-        )
-    
-    # Get recipient user
-    recipient = db.query(models.User).filter(
-        models.User.user_id == transfer_data.recipient_user_id
-    ).first()
-    
-    if not recipient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipient user not found"
-        )
-    
-    if recipient.user_id == current_user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot transfer to yourself"
-        )
-    
-    try:
-        # Create debit transaction for sender
-        sender_transaction = models.LacesLedger(
-            user_id=current_user.user_id,
-            amount=-transfer_data.amount,
-            transaction_type='TRANSFER_SENT',
-            description=f"Transfer to @{recipient.username}: {transfer_data.description}",
-            reference_id=f"transfer_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        )
+    # Build response
+    transaction_list = []
+    for tx in transactions:
+        # Generate description based on transaction type
+        description = None
+        if tx.transaction_type == 'DAILY_STIPEND':
+            description = "Daily LACES stipend"
+        elif tx.transaction_type == 'BOOST_SENT':
+            description = "Boosted a post"
+        elif tx.transaction_type == 'BOOST_RECEIVED':
+            description = "Post received boost"
+        elif tx.transaction_type == 'SIGNAL_REWARD':
+            description = "Signal quality reward"
         
-        # Create credit transaction for recipient
-        recipient_transaction = models.LacesLedger(
-            user_id=recipient.user_id,
-            amount=transfer_data.amount,
-            transaction_type='TRANSFER_RECEIVED',
-            description=f"Transfer from @{current_user.username}: {transfer_data.description}",
-            reference_id=sender_transaction.reference_id
-        )
-        
-        # Update balances
-        current_user.laces_balance -= transfer_data.amount
-        recipient.laces_balance += transfer_data.amount
-        
-        # Add transactions to database
-        db.add(sender_transaction)
-        db.add(recipient_transaction)
-        db.commit()
-        
-        return {"success": True, "message": f"Transferred {transfer_data.amount} LACES to @{recipient.username}"}
+        transaction_list.append(LacesTransaction(
+            id=tx.id,
+            amount=tx.amount,
+            transaction_type=tx.transaction_type,
+            related_post_id=tx.related_post_id,
+            created_at=tx.created_at,
+            description=description
+        ))
     
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Transfer failed"
-        )
-
-@router.post("/admin/adjust")
-async def admin_adjust_balance(
-    adjustment_data: schemas.LacesAdminAdjustment,
-    current_admin: models.User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Admin endpoint to adjust user LACES balance"""
-    # Get target user
-    target_user = db.query(models.User).filter(
-        models.User.user_id == adjustment_data.user_id
-    ).first()
-    
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    try:
-        # Create admin transaction
-        transaction = models.LacesLedger(
-            user_id=target_user.user_id,
-            amount=adjustment_data.amount,
-            transaction_type='ADMIN_ADD' if adjustment_data.amount > 0 else 'ADMIN_REMOVE',
-            description=f"Admin adjustment by @{current_admin.username}: {adjustment_data.reason}",
-            reference_id=f"admin_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        )
-        
-        # Update user balance
-        target_user.laces_balance += adjustment_data.amount
-        
-        # Ensure balance doesn't go negative
-        if target_user.laces_balance < 0:
-            target_user.laces_balance = 0
-        
-        db.add(transaction)
-        db.commit()
-        
-        return {
-            "success": True, 
-            "message": f"Adjusted @{target_user.username}'s balance by {adjustment_data.amount} LACES",
-            "new_balance": target_user.laces_balance
-        }
-    
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Balance adjustment failed"
-        )
-
-@router.get("/analytics", response_model=schemas.LacesAnalytics)
-async def get_laces_analytics(
-    timeframe: str = Query("day", regex="^(hour|day|week|month)$"),
-    current_admin: models.User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db)
-):
-    """Get LACES economy analytics (admin only)"""
-    # Calculate time range
-    now = datetime.now()
-    if timeframe == "hour":
-        start_time = now - timedelta(hours=1)
-    elif timeframe == "day":
-        start_time = now - timedelta(days=1)
-    elif timeframe == "week":
-        start_time = now - timedelta(days=7)
-    else:  # month
-        start_time = now - timedelta(days=30)
-    
-    # Get transactions in timeframe
-    transactions = db.query(models.LacesLedger).filter(
-        models.LacesLedger.created_at >= start_time
-    ).all()
-    
-    total_distributed = sum(t.amount for t in transactions if t.amount > 0)
-    total_spent = sum(abs(t.amount) for t in transactions if t.amount < 0)
-    
-    # Get transaction type breakdown
-    type_breakdown = {}
-    for transaction in transactions:
-        t_type = transaction.transaction_type
-        if t_type not in type_breakdown:
-            type_breakdown[t_type] = {"count": 0, "amount": 0}
-        type_breakdown[t_type]["count"] += 1
-        type_breakdown[t_type]["amount"] += transaction.amount
-    
-    return schemas.LacesAnalytics(
-        timeframe=timeframe,
-        total_distributed=total_distributed,
-        total_spent=total_spent,
-        transaction_count=len(transactions),
-        unique_users=len(set(t.user_id for t in transactions)),
-        type_breakdown=type_breakdown
+    return LacesLedger(
+        transactions=transaction_list,
+        total_count=total_count,
+        page=page,
+        limit=limit
     )
+
+@router.post("/laces/grant")
+async def grant_laces_admin(
+    grant_request: GrantLacesRequest,
+    db: Session = Depends(get_db)
+    # TODO: Add admin authentication
+):
+    """
+    Grant LACES tokens (admin/task only)
+    """
+    # TODO: Verify admin permissions or task auth
+    
+    result = await grant_laces(
+        db=db,
+        user_id=grant_request.user_id,
+        amount=grant_request.amount,
+        transaction_type=grant_request.transaction_type,
+        related_post_id=grant_request.related_post_id,
+        description=grant_request.description
+    )
+    
+    return result
+
+@router.post("/laces/daily-stipend")
+async def claim_daily_stipend(
+    db: Session = Depends(get_db)
+    # TODO: Add authentication
+):
+    """
+    Claim daily LACES stipend (100 LACES per day)
+    """
+    user_id = uuid.uuid4()  # TODO: Get from auth
+    
+    # Check if already claimed today
+    today = datetime.now().date()
+    existing_stipend = db.query(LacesLedgerModel).filter(
+        and_(
+            LacesLedgerModel.user_id == user_id,
+            LacesLedgerModel.transaction_type == 'DAILY_STIPEND',
+            func.date(LacesLedgerModel.created_at) == today
+        )
+    ).first()
+    
+    if existing_stipend:
+        raise HTTPException(status_code=400, detail="Daily stipend already claimed")
+    
+    # Grant stipend
+    result = await grant_laces(
+        db=db,
+        user_id=user_id,
+        amount=100,
+        transaction_type='DAILY_STIPEND',
+        description="Daily LACES stipend"
+    )
+    
+    return {
+        **result,
+        "message": "Daily stipend claimed! +100 LACES"
+    }
+
+@router.get("/laces/opportunities")
+async def get_earning_opportunities(
+    db: Session = Depends(get_db)
+    # TODO: Add authentication
+):
+    """
+    Get available LACES earning opportunities for the user
+    """
+    user_id = uuid.uuid4()  # TODO: Get from auth
+    
+    opportunities = await calculate_earning_opportunities(db, user_id)
+    
+    return opportunities
+
+@router.post("/laces/boost-post/{post_id}")
+async def boost_post_with_laces(
+    post_id: UUID4,
+    boost_amount: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db)
+    # TODO: Add authentication
+):
+    """
+    Boost a post using LACES tokens
+    """
+    user_id = uuid.uuid4()  # TODO: Get from auth
+    
+    # Verify user has enough LACES
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.laces_balance < boost_amount:
+        raise HTTPException(status_code=400, detail="Insufficient LACES balance")
+    
+    # Verify post exists
+    post = db.query(Post).filter(Post.post_id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Can't boost your own posts
+    if post.user_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot boost your own post")
+    
+    # Deduct LACES from booster
+    await grant_laces(
+        db=db,
+        user_id=user_id,
+        amount=-boost_amount,
+        transaction_type='BOOST_SENT',
+        related_post_id=post_id,
+        description=f"Boosted post with {boost_amount} LACES"
+    )
+    
+    # Reward post author (50% of boost amount)
+    reward_amount = boost_amount // 2
+    await grant_laces(
+        db=db,
+        user_id=post.user_id,
+        amount=reward_amount,
+        transaction_type='BOOST_RECEIVED',
+        related_post_id=post_id,
+        description=f"Received {reward_amount} LACES from post boost"
+    )
+    
+    # Update post boost score
+    post.boost_score = (post.boost_score or 0) + boost_amount
+    db.commit()
+    
+    return {
+        "success": True,
+        "boost_amount": boost_amount,
+        "author_reward": reward_amount,
+        "new_boost_score": post.boost_score,
+        "remaining_balance": user.laces_balance
+    }

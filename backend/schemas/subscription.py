@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -15,6 +15,4 @@ class Subscription(SubscriptionBase):
     subscription_id: uuid.UUID
     user_id: uuid.UUID
     created_at: datetime
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, UUID4, EmailStr
+from pydantic import BaseModel, UUID4, EmailStr, ConfigDict
 from typing import Optional
 
 class UserBase(BaseModel):
@@ -14,7 +14,5 @@ class UserCreate(UserBase):
 
 class User(UserBase):
     user_id: UUID4
-
-    class Config:
-        orm_mode = True
-
+    # Pydantic v2: enable ORM mode
+    model_config = ConfigDict(from_attributes=True)

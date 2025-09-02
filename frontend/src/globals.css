@@ -79,8 +79,7 @@
   }
   
   body {
-    @apply bg-gradient-earth text-foreground font-body;
-    @apply transition-colors duration-500;
+    @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     overflow-x: hidden;
   }
@@ -117,11 +116,7 @@
   
   /* Sophisticated selection styles */
   ::selection {
-    @apply bg-earth-500/15 text-earth-900;
-  }
-  
-  .dark ::selection {
-    @apply bg-earth-400/20 text-earth-50;
+    @apply bg-primary/20 text-foreground;
   }
 }
 
@@ -245,11 +240,11 @@
 @layer utilities {
   /* Animation utilities */
   .animate-in {
-    @apply animate-fade-in;
+    @apply animate-pulse;
   }
   
   .animate-up {
-    @apply animate-slide-up;
+    @apply animate-bounce;
   }
   
   /* Text utilities */
@@ -259,11 +254,11 @@
   
   /* Gradient utilities */
   .gradient-heat {
-    background: linear-gradient(135deg, theme('colors.heat') 0%, theme('colors.heat')/0.8 100%);
+    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.8) 100%);
   }
   
   .gradient-neon {
-    background: linear-gradient(135deg, theme('colors.neon') 0%, theme('colors.neon')/0.8 100%);
+    background: linear-gradient(135deg, hsl(var(--accent)) 0%, hsl(var(--accent) / 0.8) 100%);
   }
   
   /* Hide scrollbar but keep functionality */

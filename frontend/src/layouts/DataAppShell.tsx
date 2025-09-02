@@ -25,7 +25,7 @@ const AppShell: React.FC = () => {
                 </div>
                 <nav className="flex-1 p-4 space-y-2">
                     <NavLink
-                        to="/"
+                        to="/data"
                         className={({ isActive }) =>
                             `flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${isActive
                                 ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
@@ -37,7 +37,7 @@ const AppShell: React.FC = () => {
                         Dashboard
                     </NavLink>
                     <NavLink
-                        to="/items"
+                        to="items"
                         className={({ isActive }) =>
                             `flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${isActive
                                 ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'

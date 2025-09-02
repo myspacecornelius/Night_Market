@@ -2,11 +2,13 @@
     "name": "dharma-monorepo",
     "private": true,
     "packageManager": "npm@10.0.0",
-    "scripts": {
+  "scripts": {
         "dev": "turbo run dev",
         "build": "turbo run build",
-        "test": "turbo run test"
-    },
+        "test": "turbo run test",
+        "test:ui": "turbo run test:ui --filter=frontend",
+        "coverage": "turbo run coverage --filter=frontend"
+  },
     "workspaces": [
         "frontend"
     ],

@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, UUID4
+from pydantic import BaseModel, UUID4, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -37,8 +37,5 @@ class Post(PostBase):
     post_id: UUID4
     user_id: UUID4
     timestamp: datetime
-    location_id: Optional[UUID4] = None
-    boost_score: int = 0
-
-    class Config:
-        orm_mode = True
+    # Pydantic v2: enable ORM mode
+    model_config = ConfigDict(from_attributes=True)

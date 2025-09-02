@@ -14,6 +14,7 @@ const links = [
   { to: '/map', label: 'Map', icon: Map },
   { to: '/drops', label: 'Drops', icon: Calendar },
   { to: '/quests', label: 'Quests', icon: ClipboardList },
+  { to: '/gallery', label: 'UI Gallery', icon: Rss },
 ]
 
 export const Sidebar = () => {
