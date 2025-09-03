@@ -36,7 +36,7 @@ const mockItems: Item[] = Array.from({ length: 100 }, (_, i) => ({
 }));
 
 export const getItems = async (params: GetItemsParams): Promise<PaginatedItemsResponse> => {
-    console.log(`Fetching items with params:`, params);
+    // TODO: Remove mock delay for production
     await new Promise(resolve => setTimeout(resolve, 750)); // Simulate network delay
 
     let filteredItems = [...mockItems];
@@ -63,7 +63,7 @@ export const getItems = async (params: GetItemsParams): Promise<PaginatedItemsRe
 };
 
 export const getItem = async (id: string): Promise<Item> => {
-    console.log(`Fetching item with id: ${id}`);
+    // TODO: Remove mock delay for production
     await new Promise(resolve => setTimeout(resolve, 500));
     const item = mockItems.find(i => i.id === id);
     if (!item) throw new Error('Item not found');
@@ -72,7 +72,7 @@ export const getItem = async (id: string): Promise<Item> => {
 
 export const patchItem = async (item: Partial<Item> & { id: string }): Promise<Item> => {
     const { id, ...payload } = item;
-    console.log(`Patching item ${id} with payload:`, payload);
+    // TODO: Remove mock delay for production
     await new Promise(resolve => setTimeout(resolve, 600));
 
     const itemIndex = mockItems.findIndex(i => i.id === id);

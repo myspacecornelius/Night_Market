@@ -43,7 +43,7 @@ const LoginPage = () => {
           <CardHeader>
             <CardTitle className="text-2xl">Login</CardTitle>
             <CardDescription>
-              Enter your email and password to access your account.
+              Enter your username and password to access your account.
             </CardDescription>
           </CardHeader>
           <CardContent>

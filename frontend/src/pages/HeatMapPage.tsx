@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import { MapPin, Flame, Clock, Users, Filter, Zap } from "lucide-react"
 import { HeatMap, mockHeatZones } from "@/components/dharma/HeatMap"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/ui/Button"
 import { LacesDisplay } from "@/components/dharma/LacesDisplay"
 import { cn } from "@/lib/utils"
 
@@ -168,8 +168,8 @@ export default function HeatMapPage() {
             <HeatMap 
               zones={mockHeatZones}
               onZoneClick={(zone) => {
-                console.log("Zone clicked:", zone)
                 // TODO: Handle zone selection
+                // Zone selection logic would go here
               }}
             />
           </CardContent>

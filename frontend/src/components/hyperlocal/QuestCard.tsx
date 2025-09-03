@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { quests } from '@/mocks/quests';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/Button';
 
 // Define the type for a single quest
 export type Quest = typeof quests[0];

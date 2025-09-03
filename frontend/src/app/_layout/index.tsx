@@ -1,6 +1,6 @@
 import { Outlet, Link } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 

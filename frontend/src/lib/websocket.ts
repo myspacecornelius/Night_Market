@@ -46,7 +46,7 @@ export class WebSocketManager {
       this.ws = new WebSocket(`${this.url}?token=${this.token}`);
       
       this.ws.onopen = () => {
-        console.log('🔌 WebSocket connected');
+        // TODO: Add proper logging service for production
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.onConnectionChange?.(true);
@@ -66,7 +66,7 @@ export class WebSocketManager {
       };
 
       this.ws.onclose = () => {
-        console.log('🔌 WebSocket disconnected');
+        // TODO: Add proper logging service for production
         this.isConnected = false;
         this.onConnectionChange?.(false);
         this.scheduleReconnect();
@@ -107,7 +107,7 @@ export class WebSocketManager {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       setTimeout(() => {
         this.reconnectAttempts++;
-        console.log(`🔄 Reconnecting WebSocket (attempt ${this.reconnectAttempts})`);
+        // TODO: Add proper logging service for production
         this.connect();
       }, this.reconnectDelay * Math.pow(2, this.reconnectAttempts)); // Exponential backoff
     }

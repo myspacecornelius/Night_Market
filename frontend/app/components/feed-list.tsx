@@ -104,7 +104,7 @@ export function FeedList({ cellId, radiusKm }: FeedListProps) {
             className="text-blue-500 hover:underline"
             onClick={() => {
               // TODO: Implement pagination
-              console.log('Load more:', data.next);
+              // Load more functionality would go here
             }}
           >
             Load more

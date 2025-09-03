@@ -16,25 +16,33 @@ export const FloatingActionButton: React.FC = () => {
     {
       icon: <MapPin className="w-5 h-5" />,
       label: 'Post Signal',
-      onClick: () => console.log('Post signal'),
+      onClick: () => {
+        // TODO: Implement post signal functionality
+      },
       color: 'earth',
     },
     {
       icon: <Zap className="w-5 h-5" />,
       label: 'Quick Boost',
-      onClick: () => console.log('Quick boost'),
+      onClick: () => {
+        // TODO: Implement quick boost functionality
+      },
       color: 'sage',
     },
     {
       icon: <Users className="w-5 h-5" />,
       label: 'Find Community',
-      onClick: () => console.log('Find community'),
+      onClick: () => {
+        // TODO: Implement find community functionality
+      },
       color: 'stone',
     },
     {
       icon: <Settings className="w-5 h-5" />,
       label: 'Settings',
-      onClick: () => console.log('Settings'),
+      onClick: () => {
+        // TODO: Implement settings navigation
+      },
       color: 'earth',
     },
   ];
