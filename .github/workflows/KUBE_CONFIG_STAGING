@@ -1,8 +1,0 @@
-
-# Go to your GitHub repository > Settings > Secrets and variables > Actions
-
-# Click "New repository secret"
-
-# Name: KUBE_CONFIG_STAGING
-
-# Value: <your base64-
