@@ -23,7 +23,7 @@ logger = get_task_logger(__name__)
 
 # Redis client for direct access
 redis_client = redis.StrictRedis.from_url(
-    app.conf.broker_url,
+    'redis://redis:6379/0',
     decode_responses=True
 )
 
@@ -405,15 +405,12 @@ def daily_laces_stipend() -> Dict[str, Any]:
     Distribute daily LACES stipend to active users who haven't claimed it
     """
     try:
-        import sys
-        sys.path.append('/app')
-        
         from sqlalchemy import create_engine, func, and_
         from sqlalchemy.orm import sessionmaker
-        from backend.models.user import User
-        from backend.models.laces import LacesLedger
-        from backend.models.post import Post
-        from backend.models.dropzone import DropZoneCheckIn
+        from services.models.user import User
+        from services.models.laces import LacesLedger
+        from services.models.post import Post
+        from services.models.dropzone import DropZoneCheckIn
         
         # Get database connection
         database_url = os.getenv("DATABASE_URL")

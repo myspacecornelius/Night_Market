@@ -32,3 +32,4 @@ ruff.args = ["--config=/path/to/pyproject.toml"]
 minversion = "7.0"
 addopts = "-q"
 testpaths = ["services","worker","tests"]
+python_paths = "."

@@ -2,10 +2,10 @@
 logs
 *.log
 npm-debug.log*
-node_modules
-dist
-dist-ssr
-*.local
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # Python
 __pycache__/
@@ -32,10 +32,15 @@ redis-data/
 docker-compose.override.yml
 
 # IDE
-.vscode/
-.idea/
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
 *.swp
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 
 # Test data
 test_results/
@@ -44,14 +49,71 @@ coverage/
 # User data
 user_data/
 profiles/
-<<<<<<< HEAD
 
 # Custom ignores
 services/api/alembic.ini
-=======
-services/api/alembic.ini
->>>>>>> 3a18134 (chore(alembic): remove redundant services/api/alembic.ini and ignore it)
-
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+# Build outputs
+/dist
+/out
+
+# Dependency directories
+/node_modules
+
+# Test outputs
+/coverage
+
+# Next.js specific
+/.next/
+/out/
+
+# Vite specific
+.vite
+.svelte-kit
+
+# Nuxt specific
+.nuxt
+.output
+
+# Docusaurus specific
+.docusaurus
+
+# Gatsby specific
+.cache
+public
+
+# Remix specific
+.cache
+build
+public/build
+
+# Astro specific
+dist
+.astro
+
+# Svelte specific
+.svelte-kit
+
+# Vue specific
+.vue
+dist
+
+# Angular specific
+.angular
+dist
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# PNPM
+pnpm-lock.yaml

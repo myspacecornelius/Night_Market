@@ -30,88 +30,47 @@ services:
     networks:
       - appnet
 
-  migrate:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    working_dir: /app/backend
-    entrypoint: ""
-    command: alembic upgrade head
-    restart: "no"
-    networks:
-      - appnet
-
-  seed:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - AUTO_SEED_DATA=${AUTO_SEED_DATA:-true}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    working_dir: /app/backend
-    entrypoint: ""
-    command: python -m backend.seed
-    restart: "no"
-    networks:
-      - appnet
-
   api:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: services/Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - ./backend:/app/backend:cached
+      - ./services:/app/services:cached
     env_file:
       - .env
     environment:
       - PYTHONPATH=/app
-      - RUN_MIGRATIONS=false
-    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+      - RUN_MIGRATIONS=true
+    working_dir: /app/services
+    command: sh -c "alembic -c alembic.ini upgrade head && python -m seed && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health'); sys.exit(0)" ]
       interval: 10s
       timeout: 5s
       retries: 5
     depends_on:
-      seed:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      - postgres
+      - redis
     networks:
       - appnet
 
   worker:
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: worker/Dockerfile
     volumes:
-      - ./worker:/app:cached
-      - ./backend:/app/backend:cached
+      - ./worker:/app/worker:cached
+      - ./services:/app/services:cached
     env_file:
       - .env
     environment:
       - PYTHONPATH=/app
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://redis:6379/0
       - ENVIRONMENT=${ENVIRONMENT}
-    # Use correct Celery app path (module:function)
-    command: celery -A tasks:app worker --loglevel=info
+    command: celery -A worker.tasks:app worker --loglevel=info
     healthcheck:
       # Verify Redis connectivity which the worker depends on
       test: [ "CMD-SHELL", "python - <<'PY'\nimport os, sys\nimport redis\nurl=os.environ.get('REDIS_URL','redis://redis:6379/0')\ntry:\n    redis.from_url(url).ping(); sys.exit(0)\nexcept Exception as e:\n    print(e); sys.exit(1)\nPY" ]
@@ -119,8 +78,6 @@ services:
       timeout: 5s
       retries: 10
     depends_on:
-      seed:
-        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres:
@@ -130,20 +87,19 @@ services:
 
   beat:
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: worker/Dockerfile
     volumes:
-      - ./worker:/app:cached
-      - ./backend:/app/backend:cached
+      - ./worker:/app/worker:cached
+      - ./services:/app/services:cached
     env_file:
       - .env
     environment:
       - PYTHONPATH=/app
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://redis:6379/0
       - ENVIRONMENT=${ENVIRONMENT}
-    # Use correct Celery app path (module:function)
-    command: celery -A tasks:app beat --loglevel=info
+    command: celery -A worker.tasks:app beat --loglevel=info
     healthcheck:
       # Verify Redis connectivity which beat depends on
       test: [ "CMD-SHELL", "python - <<'PY'\nimport os, sys\nimport redis\nurl=os.environ.get('REDIS_URL','redis://redis:6379/0')\ntry:\n    redis.from_url(url).ping(); sys.exit(0)\nexcept Exception as e:\n    print(e); sys.exit(1)\nPY" ]
@@ -151,9 +107,9 @@ services:
       timeout: 5s
       retries: 10
     depends_on:
-      seed:
-        condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - appnet

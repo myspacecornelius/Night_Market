@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies deterministically from lockfile, then pin+rebuild esbuild
-RUN npm ci \
+RUN npm install \
     && npm install -D esbuild@0.25.9 \
     && npm rebuild esbuild
 

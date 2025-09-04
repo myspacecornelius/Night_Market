@@ -6,8 +6,8 @@ import os
 from kombu import Exchange, Queue
 
 # Broker settings
-broker_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-result_backend = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+broker_url = 'redis://redis:6379/0'
+result_backend = 'redis://redis:6379/0'
 
 # Task settings
 task_serializer = 'json'

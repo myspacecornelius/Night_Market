@@ -105,12 +105,6 @@ export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowCli
         state: { sorting },
         onSortingChange: setSorting,
         getCoreRowModel: getCoreRowModel(),
-    const table = useReactTable({
-        data: items,
-        columns,
-        state: { sorting },
-        onSortingChange: setSorting,
-        getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
     });
 
