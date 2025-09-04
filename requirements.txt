@@ -13,7 +13,7 @@ python-jose==3.3.0
 python-multipart==0.0.7
 redis==5.0.1
 Shapely==2.0.3
-SQLAlchemy==2.0.25
+SQLAlchemy==2.0.43
 starlette==0.35.1
 starlette-exporter==0.23.0
 uvicorn==0.27.0
