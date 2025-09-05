@@ -44,13 +44,8 @@ coverage/
 # User data
 user_data/
 profiles/
-<<<<<<< HEAD
-
 # Custom ignores
 services/api/alembic.ini
-=======
-services/api/alembic.ini
->>>>>>> 3a18134 (chore(alembic): remove redundant services/api/alembic.ini and ignore it)
 
 
 #Ignore vscode AI rules
