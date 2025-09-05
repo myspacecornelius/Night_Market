@@ -49,9 +49,15 @@ coverage/
 # User data
 user_data/
 profiles/
+<<<<<<< HEAD
 
 # Custom ignores
 services/api/alembic.ini
+=======
+# Custom ignores
+services/api/alembic.ini
+
+>>>>>>> 31c8db4 (Fix merge conflict markers in .gitignore preventing proper file ignoring (#11))
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
