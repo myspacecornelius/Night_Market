@@ -23,7 +23,7 @@ hiredis==2.3.2
 
 # Cloud/Storage
 boto3==1.34.34
-python-dotenv==1.0.1
+python-dotenv==1.1.1
 
 # Utilities
 httpx==0.26.0
