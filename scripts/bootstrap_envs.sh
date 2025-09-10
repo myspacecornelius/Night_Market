@@ -19,7 +19,7 @@ VITE_ENV=${VITE_ENV}
 EOF
 
 # Create the backend .env file
-cat << EOF > backend/.env
+cat << EOF > .env
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=${POSTGRES_DB}

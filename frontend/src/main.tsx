@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link, BrowserRouter } from 'react-router-dom';
 import { createRoot } from 'react-dom/client';
 
 // Ultra-simple working app with inline styles to bypass Tailwind issues
@@ -343,7 +344,11 @@ if (root) {
   try {
     const reactRoot = createRoot(root);
     console.log('React root created, rendering...');
-    reactRoot.render(<App />);
+    reactRoot.render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
     console.log('React app mounted successfully!');
   } catch (error) {
     console.error('React mounting error:', error);

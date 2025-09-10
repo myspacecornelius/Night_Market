@@ -128,7 +128,7 @@ def seed_data():
             avatar_url="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
             password_hash=get_password_hash("dharma2024"),
             is_anonymous=False,
-            laces_balance=3000  # Top tier
+            laces_balance=3001  # Top tier
         )
         
         # LA Ambassador

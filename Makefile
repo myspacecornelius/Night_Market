@@ -64,7 +64,7 @@ up: doctor
 	@echo "🔥 Dharma is starting up!"
 	@echo "📱 Frontend: http://localhost:5173"
 	@echo "🔌 API: http://localhost:8000"
-	@echo "📊 Grafana: http://localhost:3000"
+	@echo "📊 Grafana: http://localhost:3001"
 	@echo "📈 Prometheus: http://localhost:9090"
 	@echo ""
 	@echo "⏳ Services are initializing... Run 'make logs' to watch progress"

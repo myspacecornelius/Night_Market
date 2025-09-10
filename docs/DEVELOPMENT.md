@@ -48,7 +48,7 @@ make up
 Endpoints:
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:8000` (docs `/docs`, health `/health`, metrics `/metrics`)
-- Grafana: `http://localhost:3000` (admin/admin)
+- Grafana: `http://localhost:3001` (admin/admin)
 - Prometheus: `http://localhost:9090`
 
 Helpful commands:
@@ -125,7 +125,7 @@ Prometheus scrapes metrics, Grafana visualizes dashboards.
 
 - Dharma Prometheus: `localhost:9090`
 - Microservices Prometheus: `localhost:9091`
-- Grafana: `localhost:3000`
+- Grafana: `localhost:3001`
 
 Prometheus configs:
 - Dharma: `infra/prometheus.yml`
