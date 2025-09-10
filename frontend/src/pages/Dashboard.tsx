@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { TrendingUp, Zap, Users, MapPin, Coins, Activity, Target, Eye, Calendar } from 'lucide-react';
+import { TrendingUp, Zap, Users, MapPin, Coins, Activity, Target, Eye, Calendar, RefreshCw } from 'lucide-react';
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
+import axios from 'axios';
+import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 
 interface DashboardMetrics {
   lacesBalance: number;
@@ -12,23 +17,148 @@ interface DashboardMetrics {
   nearbyActivity: number;
   communityRank: number;
   totalViews: number;
+  weeklyGrowth: number;
+  signalsPosted: number;
+  networkSize: number;
+  updatedAt: string;
+}
+
+interface ActivityItem {
+  id: number;
+  type: string;
+  message: string;
+  time: string;
+  urgent: boolean;
+  user?: {
+    username: string;
+    avatar: string;
+  };
+}
+
+interface LeaderboardItem {
+  rank: number;
+  userId: string;
+  username: string;
+  avatar: string;
+  value: number;
+  isCurrentUser: boolean;
+}
+
+interface Leaderboard {
+  type: string;
+  title: string;
+  subtitle: string;
+  items: LeaderboardItem[];
+  unit: string;
 }
 
 const Dashboard = () => {
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [metrics, setMetrics] = useState<DashboardMetrics>({
-    lacesBalance: 2450,
-    lacesEarnedToday: 85,
-    activeSignals: 12,
-    nearbyActivity: 23,
-    communityRank: 47,
-    totalViews: 1240,
+    lacesBalance: 0,
+    lacesEarnedToday: 0,
+    activeSignals: 0,
+    nearbyActivity: 0,
+    communityRank: 0,
+    totalViews: 0,
+    weeklyGrowth: 0,
+    signalsPosted: 0,
+    networkSize: 0,
+    updatedAt: new Date().toISOString()
   });
 
-  const [recentActivity] = useState([
-    { id: 1, type: 'signal', message: 'Travis Scott 4s spotted at Footlocker', time: '2m ago', urgent: true },
-    { id: 2, type: 'laces', message: 'Earned 15 LACES from signal boost', time: '5m ago', urgent: false },
-    { id: 3, type: 'community', message: 'New member joined your area', time: '8m ago', urgent: false },
-  ]);
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+  const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
+  const [leaderboardType, setLeaderboardType] = useState<string>("laces");
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+
+  // Function to fetch dashboard metrics
+  const fetchMetrics = async () => {
+    try {
+      const response = await axios.get('/api/v1/dashboard/metrics');
+      setMetrics(response.data);
+    } catch (error) {
+      console.error('Error fetching dashboard metrics:', error);
+      toast.error('Failed to load dashboard metrics');
+    }
+  };
+
+  // Function to fetch activity feed
+  const fetchActivity = async () => {
+    try {
+      const response = await axios.get('/api/v1/dashboard/activity', {
+        params: { limit: 10, offset: 0 }
+      });
+      setRecentActivity(response.data.items);
+    } catch (error) {
+      console.error('Error fetching activity feed:', error);
+      toast.error('Failed to load activity feed');
+    }
+  };
+
+  // Function to fetch leaderboard data
+  const fetchLeaderboard = async (type: string = "laces") => {
+    try {
+      const response = await axios.get('/api/v1/dashboard/leaderboard', {
+        params: { type, limit: 5 }
+      });
+      setLeaderboard(response.data);
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+      toast.error('Failed to load leaderboard');
+    }
+  };
+
+  // Function to refresh all dashboard data
+  const refreshDashboard = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        fetchMetrics(),
+        fetchActivity(),
+        fetchLeaderboard(leaderboardType)
+      ]);
+      toast.success('Dashboard refreshed');
+    } catch (error) {
+      console.error('Error refreshing dashboard:', error);
+      toast.error('Failed to refresh dashboard');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Initial data load
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      setIsLoading(true);
+      try {
+        await Promise.all([
+          fetchMetrics(),
+          fetchActivity(),
+          fetchLeaderboard(leaderboardType)
+        ]);
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDashboardData();
+
+    // Set up refresh interval - every 60 seconds
+    const refreshInterval = setInterval(() => {
+      fetchMetrics();
+      fetchActivity();
+    }, 60000);
+
+    return () => clearInterval(refreshInterval);
+  }, []);
+
+  // Effect to fetch leaderboard when type changes
+  useEffect(() => {
+    fetchLeaderboard(leaderboardType);
+  }, [leaderboardType]);
 
   const containerVariants = {
     hidden: { opacity: 0 },

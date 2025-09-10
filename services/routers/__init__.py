@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 
 from services.routers import users, posts, releases, subscriptions, uploads, auth
-from services.routers import hyperlocal_subs, dropzones_ext, quests_ext, heatmap, laces
+from services.routers import hyperlocal_subs, dropzones_ext, quests_ext, heatmap, laces, dashboard
 
 router = APIRouter()
 
@@ -17,3 +17,4 @@ router.include_router(dropzones_ext.router, tags=["dropzones-ext"])
 router.include_router(quests_ext.router, tags=["quests-ext"])
 router.include_router(heatmap.router, prefix="/v1", tags=["heatmap"])
 router.include_router(laces.router, prefix="/v1", tags=["laces"])
+router.include_router(dashboard.router, prefix="/v1", tags=["dashboard"])
