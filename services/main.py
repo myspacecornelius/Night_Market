@@ -5,11 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 try:
     # When running as a package
     from .routers import router as api_router
-    from .routers import hyperlocal
+    from .routers import hyperlocal, shop
 except ImportError:
     # When running directly in Docker
     from routers import router as api_router
-    from routers import hyperlocal
+    from routers import hyperlocal, shop
 from prometheus_client import make_asgi_app
 
 # Configure logging
@@ -98,6 +98,7 @@ def root():
 # Include API routers
 app.include_router(api_router)
 app.include_router(hyperlocal.router, prefix="/v1", tags=["hyperlocal"])
+app.include_router(shop.router, prefix="/v1", tags=["shop"])
 
 if __name__ == "__main__":
     import uvicorn
