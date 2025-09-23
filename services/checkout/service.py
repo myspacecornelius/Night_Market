@@ -24,10 +24,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @dataclass
-
 class CheckoutTask:
     """Checkout task configuration"""
     task_id: str
+    user_id: str
     profile_id: str
     product_url: str
     variant_id: str
@@ -308,6 +308,7 @@ class CheckoutService:
                     # Create task
                     task = CheckoutTask(
                         task_id=task_info['task_id'],
+                        user_id=task_info['user_id'],
                         profile_id=task_info['profile_id'],
                         product_url=task_info.get('product_url', ''),
                         variant_id=task_info.get('variant_id', ''),
@@ -315,7 +316,6 @@ class CheckoutService:
                         retailer=task_info['retailer'],
                         mode=task_info['mode'],
                         is_dry_run=task_info.get('is_dry_run', False)
-
                     )
                     
                     # Process task asynchronously
@@ -370,6 +370,9 @@ class CheckoutService:
 
             # Store result in database for historical records
             await self._store_checkout_result(task, result)
+
+            # Publish result to Dharma backend
+            await self._publish_checkout_result(task, result)
             
             # Update final status
             if result.success:
@@ -490,6 +493,21 @@ class CheckoutService:
         """Store the result of a checkout attempt in the database."""
         # This is a placeholder for an actual database insert using an ORM.
         logger.info(f"Storing checkout result for task {task.task_id} in database.")
+
+    async def _publish_checkout_result(self, task: CheckoutTask, result: CheckoutResult):
+        """Publish the result of a checkout attempt to Redis for the Dharma backend."""
+        result_data = {
+            "task_id": task.task_id,
+            "user_id": task.user_id,
+            "success": result.success,
+            "order_id": result.order_id,
+            "error": result.error,
+            "product_url": task.product_url,
+            "variant_id": task.variant_id,
+            "size": task.size,
+            "retailer": task.retailer,
+        }
+        await self.redis_client.lpush("checkout_results_queue", json.dumps(result_data))
     
     async def _update_task_status(self, task_id: str, status: str, message: str):
         """Update task status and publish update"""
