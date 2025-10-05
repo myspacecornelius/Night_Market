@@ -513,11 +513,60 @@ def manage_dropzone_windows() -> Dict[str, Any]:
         logger.error(f"Dropzone management failed: {e}")
         raise
 
+@app.task(base=CallbackTask, bind=True)
+def process_checkout_results(self):
+    """
+    Process checkout results from the queue and save them to the database.
+    """
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from services.models.checkout import CheckoutTaskResult
+
+        database_url = os.getenv("DATABASE_URL")
+        engine = create_engine(database_url)
+        Session = sessionmaker(bind=engine)
+
+        with Session() as db:
+            while True:
+                result_json = redis_client.rpop("checkout_results_queue")
+                if not result_json:
+                    break # Queue is empty
+
+                result_data = json.loads(result_json)
+
+                # Create a new CheckoutTaskResult object
+                new_result = CheckoutTaskResult(
+                    task_id=result_data['task_id'],
+                    user_id=result_data['user_id'],
+                    success=result_data['success'],
+                    order_id=result_data.get('order_id'),
+                    error=result_data.get('error'),
+                    product_url=result_data['product_url'],
+                    variant_id=result_data.get('variant_id'),
+                    size=result_data.get('size'),
+                    retailer=result_data['retailer']
+                )
+                db.add(new_result)
+
+            db.commit()
+
+    except Exception as e:
+        logger.error(f"Checkout result processing failed: {e}")
+        self.retry(exc=e, countdown=10)
+
 # Scheduled tasks
 @app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     """Configure periodic tasks"""
     
+    # Process checkout results every second
+    sender.add_periodic_task(
+        1.0,
+        process_checkout_results.s(),
+        name='Process checkout results'
+    )
+
     # Refresh heatmap cache every 5 minutes
     sender.add_periodic_task(
         300.0,

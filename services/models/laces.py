@@ -13,7 +13,7 @@ class LacesLedger(Base):
     amount = Column(Integer, nullable=False)
     transaction_type = Column(
         Enum('DAILY_STIPEND', 'BOOST_SENT', 'BOOST_RECEIVED', 'SIGNAL_REWARD', 'ADMIN_ADD', 'ADMIN_REMOVE', 
-             'PURCHASE', 'REFUND', 'CONTEST_REWARD', name='transaction_type_enum'), 
+             'PURCHASE', 'REFUND', 'CONTEST_REWARD', 'CHECKOUT_TASK_PURCHASE', 'CHECKOUT_TASK_REFUND', name='transaction_type_enum'),
         nullable=False
     )
     related_post_id = Column(UUID(as_uuid=True), ForeignKey('posts.post_id', ondelete="SET NULL"), nullable=True)
