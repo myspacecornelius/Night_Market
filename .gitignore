@@ -123,3 +123,6 @@ dist
 
 # PNPM
 pnpm-lock.yaml
+
+#Ignore cursor AI rules
+.cursor/rules/codacy.mdc
