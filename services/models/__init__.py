@@ -8,5 +8,11 @@ from services.models.release import Release
 from services.models.subscription import Subscription
 from services.models.location import Location
 from services.models.laces import LacesLedger
+from services.models.session import UserSession
+from services.models.signal import Signal
+from services.models.drop import Drop, Store, DropStore
 
-__all__ = ["Base", "User", "Post", "Like", "Save", "Release", "Subscription", "Location", "LacesLedger"]
+__all__ = [
+    "Base", "User", "Post", "Like", "Save", "Release", "Subscription", 
+    "Location", "LacesLedger", "UserSession", "Signal", "Drop", "Store", "DropStore"
+]
