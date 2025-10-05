@@ -8,24 +8,18 @@ from celery import Task
 from sqlalchemy import and_, func, text
 from sqlalchemy.orm import Session
 
-# Import the main celery app from worker.tasks
-try:
-    from worker.tasks import app
+# Import the main celery app and services directly
+from worker.tasks import app
+    import importlib
+    # Import app from worker.tasks module directly
+    worker_tasks = importlib.import_module("worker.tasks")
+    app = worker_tasks.app
     from services.database import SessionLocal
     from services.models.signal import Signal
     from services.core.geohash_utils import SignalAggregator, GeohashUtils
     from services.core.redis_client import get_redis
-except ImportError:
-    # Handle import issues during development
-    pass
-
-class DatabaseTask(Task):
-    """Base task class that provides database session"""
-    _db = None
-    
-    @property
-    def db(self):
-        if self._db is None:
+    from services.core.geohash_utils import SignalAggregator, GeohashUtils
+    from services.core.redis_client import get_redis
             self._db = SessionLocal()
         return self._db
     
