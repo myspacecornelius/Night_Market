@@ -35,6 +35,7 @@ class User(Base):
     
     # Relationships
     posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    signals = relationship("Signal", back_populates="user", cascade="all, delete-orphan")
     laces_transactions = relationship("LacesLedger", back_populates="user", cascade="all, delete-orphan")
     
     __table_args__ = (

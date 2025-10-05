@@ -8,6 +8,7 @@ Create Date: 2025-10-05 12:00:00.000000
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSON
+from geoalchemy2 import Geography
 import uuid
 
 # revision identifiers, used by Alembic.
@@ -54,7 +55,7 @@ def upgrade():
     op.create_table('signals',
         sa.Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
         sa.Column('user_id', UUID(as_uuid=True), sa.ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False),
-        sa.Column('geom', sa.String, nullable=False),  # Will upgrade to PostGIS later
+        sa.Column('geom', Geography(geometry_type='POINT', srid=4326), nullable=False),
         sa.Column('geohash', sa.String(12), nullable=False),
         sa.Column('city', sa.String(100), nullable=True),
         sa.Column('signal_type', signal_type_enum, nullable=False),
@@ -83,7 +84,7 @@ def upgrade():
         sa.Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
         sa.Column('name', sa.String(200), nullable=False),
         sa.Column('slug', sa.String(100), nullable=False, unique=True),
-        sa.Column('geom', sa.String, nullable=False),  # Will upgrade to PostGIS later
+        sa.Column('geom', Geography(geometry_type='POINT', srid=4326), nullable=False),
         sa.Column('address', sa.Text, nullable=True),
         sa.Column('city', sa.String(100), nullable=False),
         sa.Column('state', sa.String(50), nullable=True),
@@ -185,6 +186,10 @@ def upgrade():
     op.execute('CREATE INDEX ix_stores_features ON stores USING GIN (features)')
     op.execute('CREATE INDEX ix_drops_regions ON drops USING GIN (regions)')
     
+    # Create spatial GIST indexes for geography columns
+    op.execute('CREATE INDEX ix_signals_geom ON signals USING GIST (geom)')
+    op.execute('CREATE INDEX ix_stores_geom ON stores USING GIST (geom)')
+    
     # Add check constraints
     op.create_check_constraint('positive_reputation', 'signals', 'reputation_score >= 0')
     op.create_check_constraint('positive_boost_count', 'signals', 'boost_count >= 0')
@@ -214,6 +219,10 @@ def downgrade():
     op.drop_constraint('positive_view_count', 'signals')
     op.drop_constraint('positive_boost_count', 'signals')
     op.drop_constraint('positive_reputation', 'signals')
+    
+    # Drop spatial GIST indexes
+    op.drop_index('ix_stores_geom', 'stores')
+    op.drop_index('ix_signals_geom', 'signals')
     
     # Drop GIN indexes
     op.drop_index('ix_drops_regions', 'drops')
