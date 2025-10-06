@@ -16,7 +16,7 @@ from services.core.redis_client import get_redis
 from services.models.signal import Signal, SignalType
 from services.models.user import User
 from services.core.geohash_utils import GeohashUtils, SignalAggregator
-from worker.tasks.signal_processing import refresh_heatmap_cache
+from worker.processors.signal_processing import refresh_heatmap_cache
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
