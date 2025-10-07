@@ -2,22 +2,113 @@ import React from 'react';
 import { Link, BrowserRouter } from 'react-router-dom';
 import { createRoot } from 'react-dom/client';
 
-// Ultra-simple working app with inline styles to bypass Tailwind issues
+// Dark theme inspired by unboxed-app.com but even darker
 const styles = {
-  container: { fontFamily: 'system-ui', minHeight: '100vh', background: '#f5f5f5' },
-  nav: { background: 'linear-gradient(135deg, #2c5d31, #4a7c59)', color: 'white', padding: '20px', marginBottom: '20px' },
-  navTitle: { fontSize: '24px', fontWeight: 'bold', marginBottom: '10px', textDecoration: 'none', color: 'white' },
-  navLinks: { display: 'flex', gap: '20px', marginTop: '15px' },
-  navLink: { color: 'rgba(255,255,255,0.8)', textDecoration: 'none', padding: '8px 16px', borderRadius: '6px', transition: 'all 0.2s' },
-  navLinkActive: { background: 'rgba(255,255,255,0.2)', color: 'white' },
-  content: { maxWidth: '1200px', margin: '0 auto', padding: '0 20px' },
-  card: { background: 'white', borderRadius: '12px', padding: '30px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginBottom: '20px' },
-  loginContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #2c5d31, #4a7c59)' },
-  loginCard: { background: 'white', borderRadius: '16px', padding: '40px', width: '100%', maxWidth: '400px', textAlign: 'center' as const },
-  input: { width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '16px', marginBottom: '15px' },
-  button: { background: 'linear-gradient(135deg, #2c5d31, #4a7c59)', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer', width: '100%' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', margin: '30px 0' },
-  actionCard: { background: 'white', borderRadius: '12px', padding: '25px', textAlign: 'center' as const, cursor: 'pointer', transition: 'all 0.3s', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }
+  container: { 
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', 
+    minHeight: '100vh', 
+    background: 'linear-gradient(135deg, #0a0b0d 0%, #1a1d23 25%, #0f1419 75%, #000000 100%)',
+    color: '#e2e8f0'
+  },
+  nav: { 
+    background: 'linear-gradient(135deg, #000000 0%, #1a1d23 50%, #0a0b0d 100%)', 
+    color: 'white', 
+    padding: '24px', 
+    marginBottom: '0px',
+    borderBottom: '1px solid rgba(255,255,255,0.05)',
+    backdropFilter: 'blur(8px)'
+  },
+  navTitle: { 
+    fontSize: '28px', 
+    fontWeight: '700', 
+    marginBottom: '12px', 
+    textDecoration: 'none', 
+    color: '#f8fafc',
+    letterSpacing: '-0.025em'
+  },
+  navLinks: { display: 'flex', gap: '24px', marginTop: '16px' },
+  navLink: { 
+    color: 'rgba(248,250,252,0.7)', 
+    textDecoration: 'none', 
+    padding: '10px 18px', 
+    borderRadius: '8px', 
+    transition: 'all 0.2s ease',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  navLinkActive: { background: 'rgba(248,250,252,0.1)', color: '#f8fafc' },
+  content: { maxWidth: '1400px', margin: '0 auto', padding: '0 24px' },
+  card: { 
+    background: 'linear-gradient(135deg, #1a1d23 0%, #0f1419 50%, #1a1d23 100%)', 
+    borderRadius: '16px', 
+    padding: '40px', 
+    boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.05) inset', 
+    marginBottom: '24px',
+    border: '1px solid rgba(255,255,255,0.05)'
+  },
+  loginContainer: { 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    minHeight: '100vh', 
+    background: 'linear-gradient(135deg, #000000 0%, #1a1d23 25%, #0f1419 75%, #000000 100%)'
+  },
+  loginCard: { 
+    background: 'linear-gradient(135deg, #1a1d23 0%, #0f1419 50%, #1a1d23 100%)', 
+    borderRadius: '20px', 
+    padding: '48px', 
+    width: '100%', 
+    maxWidth: '440px', 
+    textAlign: 'center' as const,
+    boxShadow: '0 20px 64px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.05) inset',
+    border: '1px solid rgba(255,255,255,0.1)'
+  },
+  input: { 
+    width: '100%', 
+    padding: '16px', 
+    border: '1px solid rgba(255,255,255,0.1)', 
+    borderRadius: '12px', 
+    fontSize: '16px', 
+    marginBottom: '18px',
+    background: 'rgba(0,0,0,0.3)',
+    color: '#f8fafc',
+    outline: 'none',
+    transition: 'all 0.2s ease'
+  },
+  button: { 
+    background: 'linear-gradient(135deg, #dc4d5e 0%, #b91c1c 50%, #dc4d5e 100%)', 
+    color: 'white', 
+    border: 'none', 
+    padding: '16px 32px', 
+    borderRadius: '12px', 
+    fontSize: '16px', 
+    fontWeight: '600',
+    cursor: 'pointer', 
+    width: '100%',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 4px 16px rgba(220,77,94,0.3)'
+  },
+  grid: { 
+    display: 'grid', 
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+    gap: '24px', 
+    margin: '40px 0' 
+  },
+  actionCard: { 
+    background: 'linear-gradient(135deg, #1a1d23 0%, #0f1419 50%, #1a1d23 100%)', 
+    borderRadius: '16px', 
+    padding: '32px', 
+    textAlign: 'center' as const, 
+    cursor: 'pointer', 
+    transition: 'all 0.3s ease', 
+    boxShadow: '0 8px 32px rgba(0,0,0,0.2), 0 1px 0 rgba(255,255,255,0.05) inset',
+    border: '1px solid rgba(255,255,255,0.05)',
+    transform: 'translateY(0)',
+    '&:hover': {
+      transform: 'translateY(-4px)',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.3)'
+    }
+  }
 };
 
 // Simple auth hook
@@ -110,40 +201,72 @@ const Dashboard = () => (
   <div style={styles.container}>
     <div style={styles.content}>
       <div style={styles.card}>
-        <h1 style={{ margin: '0 0 10px 0', fontSize: '36px', color: '#2c5d31' }}>Underground Sneaker Network</h1>
-        <p style={{ color: '#666', fontSize: '18px' }}>The premier platform for sneaker culture</p>
+        <h1 style={{ 
+          margin: '0 0 16px 0', 
+          fontSize: '48px', 
+          color: '#f8fafc',
+          fontWeight: '700',
+          letterSpacing: '-0.05em',
+          lineHeight: '1.1'
+        }}>Underground Sneaker Network</h1>
+        <p style={{ 
+          color: 'rgba(248,250,252,0.7)', 
+          fontSize: '20px',
+          margin: '0',
+          lineHeight: '1.5'
+        }}>The premier platform for sneaker culture</p>
       </div>
 
       <div style={styles.grid}>
         <Link to="/heatmap" style={{ textDecoration: 'none' }}>
-          <div style={{ ...styles.actionCard, background: 'linear-gradient(135deg, #4a7c59, #2c5d31)', color: 'white' }}>
-            <div style={{ fontSize: '48px', marginBottom: '15px' }}>🗺️</div>
-            <h3 style={{ margin: '0 0 10px 0' }}>Heat Map</h3>
-            <p style={{ margin: '0', opacity: 0.9 }}>Track live drop activity</p>
+          <div style={{ 
+            ...styles.actionCard, 
+            background: 'linear-gradient(135deg, #dc4d5e 0%, #b91c1c 50%, #dc4d5e 100%)', 
+            color: 'white',
+            boxShadow: '0 8px 32px rgba(220,77,94,0.3), 0 1px 0 rgba(255,255,255,0.1) inset'
+          }}>
+            <div style={{ fontSize: '56px', marginBottom: '20px' }}>🗺️</div>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '24px', fontWeight: '600' }}>Heat Map</h3>
+            <p style={{ margin: '0', opacity: 0.9, fontSize: '16px' }}>Track live drop activity</p>
           </div>
         </Link>
         
         <Link to="/dropzones" style={{ textDecoration: 'none' }}>
-          <div style={{ ...styles.actionCard, background: 'linear-gradient(135deg, #8b7355, #5d4e37)', color: 'white' }}>
-            <div style={{ fontSize: '48px', marginBottom: '15px' }}>📍</div>
-            <h3 style={{ margin: '0 0 10px 0' }}>Drop Zones</h3>
-            <p style={{ margin: '0', opacity: 0.9 }}>Community gathering spots</p>
+          <div style={{ 
+            ...styles.actionCard, 
+            background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 50%, #7c3aed 100%)', 
+            color: 'white',
+            boxShadow: '0 8px 32px rgba(124,58,237,0.3), 0 1px 0 rgba(255,255,255,0.1) inset'
+          }}>
+            <div style={{ fontSize: '56px', marginBottom: '20px' }}>📍</div>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '24px', fontWeight: '600' }}>Drop Zones</h3>
+            <p style={{ margin: '0', opacity: 0.9, fontSize: '16px' }}>Community gathering spots</p>
           </div>
         </Link>
         
         <Link to="/laces" style={{ textDecoration: 'none' }}>
-          <div style={{ ...styles.actionCard, background: 'linear-gradient(135deg, #8e7788, #6b5b73)', color: 'white' }}>
-            <div style={{ fontSize: '48px', marginBottom: '15px' }}>🏆</div>
-            <h3 style={{ margin: '0 0 10px 0' }}>LACES</h3>
-            <p style={{ margin: '0', opacity: 0.9 }}>Your reputation currency</p>
+          <div style={{ 
+            ...styles.actionCard, 
+            background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 50%, #ea580c 100%)', 
+            color: 'white',
+            boxShadow: '0 8px 32px rgba(234,88,12,0.3), 0 1px 0 rgba(255,255,255,0.1) inset'
+          }}>
+            <div style={{ fontSize: '56px', marginBottom: '20px' }}>🏆</div>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '24px', fontWeight: '600' }}>LACES</h3>
+            <p style={{ margin: '0', opacity: 0.9, fontSize: '16px' }}>Your reputation currency</p>
           </div>
         </Link>
         
         <Link to="/feed" style={{ textDecoration: 'none' }}>
-          <div style={{ ...styles.actionCard, background: 'linear-gradient(135deg, #a0522d, #8b4513)', color: 'white' }}>
-            <div style={{ fontSize: '48px', marginBottom: '15px' }}>📱</div>
-            <h3 style={{ margin: '0 0 10px 0' }}>Community Feed</h3>
-            <p style={{ margin: '0', opacity: 0.9 }}>Latest network updates</p>
+          <div style={{ 
+            ...styles.actionCard, 
+            background: 'linear-gradient(135deg, #0891b2 0%, #0e7490 50%, #0891b2 100%)', 
+            color: 'white',
+            boxShadow: '0 8px 32px rgba(8,145,178,0.3), 0 1px 0 rgba(255,255,255,0.1) inset'
+          }}>
+            <div style={{ fontSize: '56px', marginBottom: '20px' }}>📱</div>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '24px', fontWeight: '600' }}>Community Feed</h3>
+            <p style={{ margin: '0', opacity: 0.9, fontSize: '16px' }}>Latest network updates</p>
           </div>
         </Link>
       </div>
@@ -156,12 +279,39 @@ const HeatMapPage = () => (
   <div style={styles.container}>
     <div style={styles.content}>
       <div style={styles.card}>
-        <h1 style={{ color: '#2c5d31', marginBottom: '20px' }}>🗺️ Heat Map</h1>
-        <p>Real-time sneaker drop activity tracking across major cities.</p>
-        <div style={{ height: '300px', background: 'linear-gradient(45deg, #e8f5e8, #f0f8f0)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '20px' }}>
-          <div style={{ textAlign: 'center', color: '#4a7c59' }}>
-            <h3>Interactive Map Loading...</h3>
-            <p>📍 47 Active Drops • 🔥 12 Hot Zones • 👥 1,248 Users Online</p>
+        <h1 style={{ 
+          color: '#f8fafc', 
+          marginBottom: '24px',
+          fontSize: '36px',
+          fontWeight: '700',
+          letterSpacing: '-0.025em'
+        }}>🗺️ Heat Map</h1>
+        <p style={{ 
+          color: 'rgba(248,250,252,0.7)', 
+          fontSize: '18px',
+          lineHeight: '1.6'
+        }}>Real-time sneaker drop activity tracking across major cities.</p>
+        <div style={{ 
+          height: '400px', 
+          background: 'linear-gradient(135deg, #000000 0%, #1a1d23 50%, #0f1419 100%)', 
+          borderRadius: '16px', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          marginTop: '32px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3) inset'
+        }}>
+          <div style={{ textAlign: 'center', color: '#f8fafc' }}>
+            <h3 style={{ 
+              fontSize: '24px',
+              fontWeight: '600',
+              marginBottom: '16px'
+            }}>Interactive Map Loading...</h3>
+            <p style={{ 
+              fontSize: '16px',
+              color: 'rgba(248,250,252,0.7)'
+            }}>📍 47 Active Drops • 🔥 12 Hot Zones • 👥 1,248 Users Online</p>
           </div>
         </div>
       </div>
@@ -173,13 +323,41 @@ const DropZonesPage = () => (
   <div style={styles.container}>
     <div style={styles.content}>
       <div style={styles.card}>
-        <h1 style={{ color: '#2c5d31', marginBottom: '20px' }}>📍 Drop Zones</h1>
-        <p>Join community-organized sneaker hunting groups in your area.</p>
-        <div style={{ marginTop: '30px' }}>
-          <div style={{ ...styles.card, background: '#f8f9fa' }}>
-            <h3 style={{ color: '#2c5d31', margin: '0 0 10px 0' }}>SoHo Sneaker Squad</h3>
-            <p style={{ color: '#666', margin: '0 0 15px 0' }}>Premium sneaker hunting in NYC's fashion district</p>
-            <div style={{ color: '#666', fontSize: '14px', marginBottom: '15px' }}>👥 247 members • 📍 Manhattan, NY</div>
+        <h1 style={{ 
+          color: '#f8fafc', 
+          marginBottom: '24px',
+          fontSize: '36px',
+          fontWeight: '700',
+          letterSpacing: '-0.025em'
+        }}>📍 Drop Zones</h1>
+        <p style={{ 
+          color: 'rgba(248,250,252,0.7)', 
+          fontSize: '18px',
+          lineHeight: '1.6'
+        }}>Join community-organized sneaker hunting groups in your area.</p>
+        <div style={{ marginTop: '32px' }}>
+          <div style={{ 
+            ...styles.card, 
+            background: 'linear-gradient(135deg, #000000 0%, #1a1d23 50%, #0f1419 100%)',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <h3 style={{ 
+              color: '#f8fafc', 
+              margin: '0 0 12px 0',
+              fontSize: '24px',
+              fontWeight: '600'
+            }}>SoHo Sneaker Squad</h3>
+            <p style={{ 
+              color: 'rgba(248,250,252,0.7)', 
+              margin: '0 0 20px 0',
+              fontSize: '16px',
+              lineHeight: '1.5'
+            }}>Premium sneaker hunting in NYC's fashion district</p>
+            <div style={{ 
+              color: 'rgba(248,250,252,0.6)', 
+              fontSize: '14px', 
+              marginBottom: '20px' 
+            }}>👥 247 members • 📍 Manhattan, NY</div>
             <button style={styles.button}>Join Zone</button>
           </div>
         </div>
@@ -192,12 +370,41 @@ const LacesPage = () => (
   <div style={styles.container}>
     <div style={styles.content}>
       <div style={styles.card}>
-        <h1 style={{ color: '#2c5d31', marginBottom: '20px' }}>🏆 LACES</h1>
-        <p>Your reputation currency in the underground network.</p>
-        <div style={{ ...styles.card, background: 'linear-gradient(135deg, #6b5b73, #8e7788)', color: 'white', textAlign: 'center', margin: '30px 0' }}>
-          <h2 style={{ margin: '0 0 20px 0' }}>Your Balance</h2>
-          <div style={{ fontSize: '48px', fontWeight: 'bold' }}>1,250 🏆</div>
-          <p style={{ margin: '20px 0 0 0', opacity: 0.9 }}>Rank #247 in the network</p>
+        <h1 style={{ 
+          color: '#f8fafc', 
+          marginBottom: '24px',
+          fontSize: '36px',
+          fontWeight: '700',
+          letterSpacing: '-0.025em'
+        }}>🏆 LACES</h1>
+        <p style={{ 
+          color: 'rgba(248,250,252,0.7)', 
+          fontSize: '18px',
+          lineHeight: '1.6'
+        }}>Your reputation currency in the underground network.</p>
+        <div style={{ 
+          ...styles.card, 
+          background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 50%, #ea580c 100%)', 
+          color: 'white', 
+          textAlign: 'center', 
+          margin: '32px 0',
+          boxShadow: '0 8px 32px rgba(234,88,12,0.3), 0 1px 0 rgba(255,255,255,0.1) inset'
+        }}>
+          <h2 style={{ 
+            margin: '0 0 24px 0',
+            fontSize: '28px',
+            fontWeight: '600'
+          }}>Your Balance</h2>
+          <div style={{ 
+            fontSize: '64px', 
+            fontWeight: '700',
+            marginBottom: '16px'
+          }}>1,250 🏆</div>
+          <p style={{ 
+            margin: '0', 
+            opacity: 0.9,
+            fontSize: '18px'
+          }}>Rank #247 in the network</p>
         </div>
       </div>
     </div>
@@ -208,24 +415,78 @@ const FeedPage = () => (
   <div style={styles.container}>
     <div style={styles.content}>
       <div style={styles.card}>
-        <h1 style={{ color: '#2c5d31', marginBottom: '20px' }}>📱 Community Feed</h1>
-        <p>Latest drops, wins, and network updates from the community.</p>
-        <div style={{ marginTop: '30px' }}>
-          <div style={{ ...styles.card, background: '#f8f9fa' }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4a7c59', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '15px', fontWeight: 'bold' }}>
+        <h1 style={{ 
+          color: '#f8fafc', 
+          marginBottom: '24px',
+          fontSize: '36px',
+          fontWeight: '700',
+          letterSpacing: '-0.025em'
+        }}>📱 Community Feed</h1>
+        <p style={{ 
+          color: 'rgba(248,250,252,0.7)', 
+          fontSize: '18px',
+          lineHeight: '1.6'
+        }}>Latest drops, wins, and network updates from the community.</p>
+        <div style={{ marginTop: '32px' }}>
+          <div style={{ 
+            ...styles.card, 
+            background: 'linear-gradient(135deg, #000000 0%, #1a1d23 50%, #0f1419 100%)',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ 
+                width: '48px', 
+                height: '48px', 
+                borderRadius: '50%', 
+                background: 'linear-gradient(135deg, #dc4d5e, #b91c1c)', 
+                color: 'white', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                marginRight: '16px', 
+                fontWeight: '700',
+                fontSize: '18px'
+              }}>
                 JS
               </div>
               <div>
-                <strong>SneakerKing23</strong>
-                <div style={{ fontSize: '14px', color: '#666' }}>2 minutes ago</div>
+                <strong style={{ color: '#f8fafc', fontSize: '16px' }}>SneakerKing23</strong>
+                <div style={{ 
+                  fontSize: '14px', 
+                  color: 'rgba(248,250,252,0.6)',
+                  marginTop: '2px'
+                }}>2 minutes ago</div>
               </div>
             </div>
-            <p>🔥 MASSIVE WIN! Just copped the Jordan 11 Retro "Bred" from Nike SoHo. The line was crazy but worth it!</p>
-            <div style={{ display: 'flex', gap: '20px', marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
-              <span style={{ color: '#666', cursor: 'pointer' }}>❤️ 47</span>
-              <span style={{ color: '#666', cursor: 'pointer' }}>💬 12</span>
-              <span style={{ color: '#28a745', fontWeight: 'bold' }}>+25 LACES</span>
+            <p style={{ 
+              color: '#f8fafc',
+              fontSize: '16px',
+              lineHeight: '1.5',
+              marginBottom: '20px'
+            }}>🔥 MASSIVE WIN! Just copped the Jordan 11 Retro "Bred" from Nike SoHo. The line was crazy but worth it!</p>
+            <div style={{ 
+              display: 'flex', 
+              gap: '24px', 
+              paddingTop: '16px', 
+              borderTop: '1px solid rgba(255,255,255,0.1)' 
+            }}>
+              <span style={{ 
+                color: 'rgba(248,250,252,0.7)', 
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}>❤️ 47</span>
+              <span style={{ 
+                color: 'rgba(248,250,252,0.7)', 
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}>💬 12</span>
+              <span style={{ 
+                color: '#10b981', 
+                fontWeight: '600',
+                fontSize: '14px'
+              }}>+25 LACES</span>
             </div>
           </div>
         </div>
@@ -252,9 +513,20 @@ const LoginPage = ({ onLogin }: any) => {
   return (
     <div style={styles.loginContainer}>
       <div style={styles.loginCard}>
-        <div style={{ fontSize: '64px', marginBottom: '20px' }}>🔥</div>
-        <h1 style={{ margin: '0 0 10px 0', fontSize: '32px', color: '#2c5d31' }}>Dharma</h1>
-        <p style={{ margin: '0 0 30px 0', color: '#666' }}>Enter the underground network</p>
+        <div style={{ fontSize: '80px', marginBottom: '24px' }}>🔥</div>
+        <h1 style={{ 
+          margin: '0 0 16px 0', 
+          fontSize: '42px', 
+          color: '#f8fafc',
+          fontWeight: '700',
+          letterSpacing: '-0.05em'
+        }}>Dharma</h1>
+        <p style={{ 
+          margin: '0 0 40px 0', 
+          color: 'rgba(248,250,252,0.7)',
+          fontSize: '18px',
+          lineHeight: '1.5'
+        }}>Enter the underground network</p>
         
         <form onSubmit={handleSubmit}>
           <input
@@ -262,7 +534,11 @@ const LoginPage = ({ onLogin }: any) => {
             placeholder="Enter any email (e.g. test@example.com)"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
+            style={{
+              ...styles.input,
+              color: '#f8fafc',
+              '::placeholder': { color: 'rgba(248,250,252,0.5)' }
+            }}
             autoComplete="email"
           />
           <input
@@ -270,19 +546,44 @@ const LoginPage = ({ onLogin }: any) => {
             placeholder="Enter any password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
+            style={{
+              ...styles.input,
+              color: '#f8fafc'
+            }}
             autoComplete="current-password"
           />
-          <button type="submit" style={{...styles.button, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase'}}>
+          <button type="submit" style={{
+            ...styles.button, 
+            fontSize: '18px', 
+            fontWeight: '700', 
+            textTransform: 'uppercase',
+            letterSpacing: '0.025em'
+          }}>
             🚀 Enter Network
           </button>
         </form>
         
-        <div style={{ marginTop: '20px', padding: '15px', background: '#e8f5e8', borderRadius: '8px' }}>
-          <p style={{ margin: '0', fontSize: '14px', color: '#2c5d31', fontWeight: 'bold' }}>
+        <div style={{ 
+          marginTop: '32px', 
+          padding: '20px', 
+          background: 'rgba(220,77,94,0.1)', 
+          borderRadius: '12px',
+          border: '1px solid rgba(220,77,94,0.2)'
+        }}>
+          <p style={{ 
+            margin: '0 0 8px 0', 
+            fontSize: '14px', 
+            color: '#dc4d5e', 
+            fontWeight: '600' 
+          }}>
             📝 Demo Login Instructions:
           </p>
-          <p style={{ margin: '5px 0 0 0', fontSize: '14px', color: '#4a7c59' }}>
+          <p style={{ 
+            margin: '0', 
+            fontSize: '14px', 
+            color: 'rgba(248,250,252,0.8)',
+            lineHeight: '1.4'
+          }}>
             Enter ANY email and password to access the app
           </p>
         </div>
