@@ -1,11 +1,118 @@
 import * as React from "react"
 import { motion } from "framer-motion"
-import { MapPin, Flame, Users, Clock } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/Button"
+import { LatLngExpression } from "leaflet"
 import { cn } from "@/lib/utils"
+import { BaseMap, MapBounds } from "@/components/map/BaseMap"
+import { HeatMapOverlay, HeatMapData, HeatMapBin } from "@/components/map/HeatMapOverlay"
+import { DropZoneLayer, DropZone } from "@/components/map/DropZoneLayer"
 
-interface HeatZone {
+interface HeatMapProps {
+  heatMapData?: HeatMapData
+  dropZones?: DropZone[]
+  center?: LatLngExpression
+  zoom?: number
+  timeWindow?: "1h" | "24h" | "7d"
+  showDropZones?: boolean
+  isLoading?: boolean
+  onMapMove?: (center: LatLngExpression, zoom: number, bounds: MapBounds) => void
+  onHeatTileClick?: (bin: HeatMapBin) => void
+  onDropZoneClick?: (zone: DropZone) => void
+  onDropZoneCheckIn?: (zoneId: string, lat: number, lng: number) => void
+  onDropZoneJoin?: (zoneId: string) => void
+  userLocation?: LatLngExpression
+  enableGeolocation?: boolean
+  className?: string
+}
+
+export function HeatMap({ 
+  heatMapData,
+  dropZones = [],
+  center = [40.7589, -73.9851], // Default to NYC
+  zoom = 12,
+  timeWindow = "24h",
+  showDropZones = true,
+  isLoading = false,
+  onMapMove,
+  onHeatTileClick,
+  onDropZoneClick,
+  onDropZoneCheckIn,
+  onDropZoneJoin,
+  userLocation,
+  enableGeolocation = false,
+  className 
+}: HeatMapProps) {
+  const [currentZoom, setCurrentZoom] = React.useState(zoom)
+  const [currentBounds, setCurrentBounds] = React.useState<MapBounds>({
+    north: 0,
+    south: 0,
+    east: 0,
+    west: 0
+  })
+
+  const handleMapMove = React.useCallback((
+    newCenter: LatLngExpression,
+    newZoom: number,
+    bounds: MapBounds
+  ) => {
+    setCurrentZoom(newZoom)
+    setCurrentBounds(bounds)
+    onMapMove?.(newCenter, newZoom, bounds)
+  }, [onMapMove])
+
+  return (
+    <div className={cn("relative w-full h-96 rounded-lg overflow-hidden bg-stone-900", className)}>
+      <BaseMap
+        center={center}
+        zoom={zoom}
+        onMapMove={handleMapMove}
+        enableGeolocation={enableGeolocation}
+        className="w-full h-full"
+      >
+        {/* Heat Map Overlay */}
+        <HeatMapOverlay
+          data={heatMapData}
+          isLoading={isLoading}
+          zoom={currentZoom}
+          bounds={currentBounds}
+          timeWindow={timeWindow}
+          onTileClick={onHeatTileClick}
+        />
+
+        {/* Drop Zones Layer */}
+        {showDropZones && (
+          <DropZoneLayer
+            zones={dropZones}
+            userLocation={userLocation}
+            onZoneClick={onDropZoneClick}
+            onCheckIn={onDropZoneCheckIn}
+            onJoinZone={onDropZoneJoin}
+          />
+        )}
+      </BaseMap>
+
+      {/* Loading overlay */}
+      {isLoading && (
+        <motion.div
+          className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="bg-stone-800/90 text-white px-4 py-3 rounded-lg flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-amber-400 border-t-transparent" />
+            <span className="text-sm font-medium">Loading map data...</span>
+          </div>
+        </motion.div>
+      )}
+    </div>
+  )
+}
+
+// Export types for external use
+export type { HeatMapData, HeatMapBin, DropZone }
+
+// Legacy interface for backward compatibility
+export interface HeatZone {
   id: string
   name: string
   lat: number
@@ -17,201 +124,84 @@ interface HeatZone {
   distance?: string
 }
 
-interface HeatMapProps {
-  zones: HeatZone[]
-  onZoneClick?: (zone: HeatZone) => void
-  className?: string
-}
-
-export function HeatMap({ zones, onZoneClick, className }: HeatMapProps) {
-  const [selectedZone, setSelectedZone] = React.useState<HeatZone | null>(null)
-  
-  const getIntensityColor = (intensity: number) => {
-    if (intensity >= 80) return "bg-heat shadow-heat"
-    if (intensity >= 60) return "bg-orange-500 shadow-orange-500/30"
-    if (intensity >= 40) return "bg-yellow-500 shadow-yellow-500/30"
-    if (intensity >= 20) return "bg-neon shadow-neon"
-    return "bg-steel shadow-steel/30"
-  }
-  
-  const getActivityIcon = (activity: HeatZone["activity"]) => {
-    switch (activity) {
-      case "drop": return <Flame size={16} />
-      case "restock": return <Users size={16} />
-      case "line": return <Clock size={16} />
-      default: return <MapPin size={16} />
+// Mock data for demo/testing
+export const mockHeatMapData: HeatMapData = {
+  bins: [
+    {
+      geohash: "dr5regy",
+      lat: 40.7234,
+      lng: -74.0034,
+      signal_count: 15,
+      post_count: 8,
+      boost_score: 450,
+      top_brands: [{ brand: "Nike", count: 12 }, { brand: "Adidas", count: 8 }],
+      top_tags: ["jordan", "dunk", "drop"],
+      sample_posts: [
+        {
+          post_id: "1",
+          content_text: "SoHo Nike has the new Jordan 4s in stock!",
+          timestamp: new Date(Date.now() - 120000).toISOString(),
+          boost_score: 45
+        }
+      ]
+    },
+    {
+      geohash: "dr5regz",
+      lat: 40.7359,
+      lng: -73.9911,
+      signal_count: 8,
+      post_count: 12,
+      boost_score: 320,
+      top_brands: [{ brand: "Supreme", count: 7 }, { brand: "Nike", count: 5 }],
+      top_tags: ["supreme", "box logo", "line"],
+      sample_posts: [
+        {
+          post_id: "2",
+          content_text: "Line forming at Union Square for Supreme drop",
+          timestamp: new Date(Date.now() - 300000).toISOString(),
+          boost_score: 38
+        }
+      ]
     }
-  }
-  
-  return (
-    <div className={cn("relative w-full h-96 bg-muted rounded-lg overflow-hidden", className)}>
-      {/* Map Background - Placeholder for actual map integration */}
-      <div className="absolute inset-0 bg-gradient-to-br from-ink/5 to-steel/10" />
-      
-      {/* Heat Zones */}
-      <div className="absolute inset-0 p-4">
-        {zones.map((zone, index) => (
-          <motion.div
-            key={zone.id}
-            className="absolute"
-            style={{
-              left: `${(zone.lng + 180) / 360 * 100}%`,
-              top: `${(90 - zone.lat) / 180 * 100}%`,
-            }}
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: index * 0.1 }}
-          >
-            <motion.button
-              className={cn(
-                "relative w-8 h-8 rounded-full border-2 border-background",
-                "flex items-center justify-center text-white",
-                "hover:scale-110 active:scale-95 transition-all duration-150",
-                getIntensityColor(zone.intensity)
-              )}
-              onClick={() => {
-                setSelectedZone(zone)
-                onZoneClick?.(zone)
-              }}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              {getActivityIcon(zone.activity)}
-              
-              {/* Pulse animation for high intensity */}
-              {zone.intensity >= 80 && (
-                <motion.div
-                  className="absolute inset-0 rounded-full bg-heat"
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                />
-              )}
-            </motion.button>
-            
-            {/* Zone label */}
-            <div className="absolute top-10 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
-              <div className="bg-background/90 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium">
-                {zone.name}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-      
-      {/* Zone Detail Sheet */}
-      {selectedZone && (
-        <motion.div
-          className="absolute bottom-0 left-0 right-0"
-          initial={{ y: "100%" }}
-          animate={{ y: 0 }}
-          exit={{ y: "100%" }}
-        >
-          <Card className="rounded-t-xl rounded-b-none border-t border-x-0 border-b-0">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-grotesk font-semibold text-lg">
-                    {selectedZone.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {selectedZone.distance && `${selectedZone.distance} away • `}
-                    {selectedZone.participants} active
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedZone(null)}
-                >
-                  ×
-                </Button>
-              </div>
-              
-              <div className="flex items-center gap-4 mb-4">
-                <div className="flex items-center gap-2">
-                  <div className={cn("w-3 h-3 rounded-full", getIntensityColor(selectedZone.intensity))} />
-                  <span className="text-sm font-medium">
-                    {selectedZone.intensity}% heat
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <Clock size={14} />
-                  {selectedZone.lastUpdate}
-                </div>
-              </div>
-              
-              <div className="flex gap-2">
-                <Button size="sm" variant="heat" className="flex-1">
-                  Track Zone
-                </Button>
-                <Button size="sm" variant="outline">
-                  Share Signal
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-      
-      {/* Heat Legend */}
-      <div className="absolute top-4 right-4">
-        <Card className="p-3">
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Heat Level
-            </div>
-            {[
-              { range: "80-100%", color: "bg-heat", label: "Blazing" },
-              { range: "60-79%", color: "bg-orange-500", label: "Hot" },
-              { range: "40-59%", color: "bg-yellow-500", label: "Warm" },
-              { range: "20-39%", color: "bg-neon", label: "Cool" },
-              { range: "0-19%", color: "bg-steel", label: "Cold" },
-            ].map((level) => (
-              <div key={level.range} className="flex items-center gap-2 text-xs">
-                <div className={cn("w-2 h-2 rounded-full", level.color)} />
-                <span className="text-muted-foreground">{level.label}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    </div>
-  )
+  ],
+  total_posts: 20,
+  time_window: "24h"
 }
 
-// Mock data for demo
-export const mockHeatZones: HeatZone[] = [
+export const mockDropZones: DropZone[] = [
   {
-    id: "1",
-    name: "SoHo Nike",
-    lat: 40.7234,
-    lng: -74.0034,
-    intensity: 95,
-    activity: "drop",
-    lastUpdate: "2m ago",
-    participants: 47,
-    distance: "0.3 mi"
+    id: "zone-1",
+    name: "SoHo Sneaker Hunt",
+    description: "Weekly sneaker hunting meetup in SoHo area",
+    owner_id: "user-1",
+    center_lat: 40.7234,
+    center_lng: -74.0034,
+    radius_meters: 200,
+    status: "active",
+    starts_at: new Date(Date.now() - 3600000).toISOString(),
+    ends_at: new Date(Date.now() + 7200000).toISOString(),
+    member_count: 47,
+    check_in_count: 23,
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    is_member: true,
+    user_role: "member",
+    distance_from_user: 300
   },
   {
-    id: "2", 
-    name: "Union Square",
-    lat: 40.7359,
-    lng: -73.9911,
-    intensity: 72,
-    activity: "line",
-    lastUpdate: "5m ago", 
-    participants: 23,
-    distance: "0.8 mi"
-  },
-  {
-    id: "3",
-    name: "Brooklyn Bridge",
-    lat: 40.7061,
-    lng: -73.9969,
-    intensity: 45,
-    activity: "restock",
-    lastUpdate: "12m ago",
-    participants: 12,
-    distance: "1.2 mi"
+    id: "zone-2", 
+    name: "Brooklyn Hypebeast Meetup",
+    description: "Monthly gathering for streetwear enthusiasts",
+    owner_id: "user-2",
+    center_lat: 40.7061,
+    center_lng: -73.9969,
+    radius_meters: 150,
+    status: "scheduled",
+    starts_at: new Date(Date.now() + 3600000).toISOString(),
+    ends_at: new Date(Date.now() + 10800000).toISOString(),
+    member_count: 32,
+    check_in_count: 0,
+    created_at: new Date(Date.now() - 172800000).toISOString(),
+    is_member: false,
+    distance_from_user: 1200
   }
 ]
