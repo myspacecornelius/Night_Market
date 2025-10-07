@@ -6,10 +6,14 @@ try:
     # When running as a package
     from .routers import router as api_router
     from .routers import hyperlocal, shop
+    from .core.redis_client import get_redis
+    from .middleware.rate_limit import RateLimitMiddleware
 except ImportError:
     # When running directly in Docker
     from routers import router as api_router
     from routers import hyperlocal, shop
+    from core.redis_client import get_redis
+    from middleware.rate_limit import RateLimitMiddleware
 from prometheus_client import make_asgi_app
 
 # Configure logging
@@ -41,6 +45,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting middleware - protect against abuse
+try:
+    redis_client = get_redis()
+    app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
+    logger.info("🛡️ Rate limiting middleware enabled")
+except Exception as e:
+    logger.warning(f"⚠️ Rate limiting disabled: {e}")
+    logger.info("🔧 Continuing without rate limiting in development mode")
 
 @app.on_event("startup")
 async def startup_event():

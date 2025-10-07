@@ -1,11 +1,13 @@
 import * as React from "react"
 import { motion } from "framer-motion"
-import { MapPin, Flame, Clock, Users, Filter, Zap } from "lucide-react"
-import { HeatMap, mockHeatZones } from "@/components/dharma/HeatMap"
+import { MapPin, Flame, Clock, Users, Filter, Zap, Navigation, CheckCircle, Timer } from "lucide-react"
+import { HeatMap, mockHeatMapData, mockDropZones, HeatMapBin, DropZone } from "@/components/dharma/HeatMap"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/Button"
 import { LacesDisplay } from "@/components/dharma/LacesDisplay"
 import { cn } from "@/lib/utils"
+import { LatLngExpression } from "leaflet"
+import { MapBounds } from "@/components/map/BaseMap"
 
 interface QuickStat {
   label: string
@@ -53,6 +55,12 @@ const recentActivity = [
 
 export default function HeatMapPage() {
   const [selectedFilter, setSelectedFilter] = React.useState<string>("all")
+  const [timeWindow, setTimeWindow] = React.useState<"1h" | "24h" | "7d">("24h")
+  const [mapCenter, setMapCenter] = React.useState<LatLngExpression>([40.7589, -73.9851])
+  const [mapZoom, setMapZoom] = React.useState(13)
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [selectedHeatTile, setSelectedHeatTile] = React.useState<HeatMapBin | null>(null)
+  const [selectedDropZone, setSelectedDropZone] = React.useState<DropZone | null>(null)
   
   const filters = [
     { id: "all", label: "All Activity", icon: Zap },
@@ -60,7 +68,48 @@ export default function HeatMapPage() {
     { id: "restocks", label: "Restocks", icon: Users },
     { id: "lines", label: "Lines", icon: Clock }
   ]
+
+  const timeFilters = [
+    { id: "1h" as const, label: "1 Hour", icon: Timer },
+    { id: "24h" as const, label: "24 Hours", icon: Clock },
+    { id: "7d" as const, label: "7 Days", icon: Clock }
+  ]
   
+  // Handler functions for map interactions
+  const handleMapMove = React.useCallback((center: LatLngExpression, zoom: number, bounds: MapBounds) => {
+    setMapCenter(center)
+    setMapZoom(zoom)
+    // In Phase B, this will trigger new data fetching based on bounds
+    console.log("Map moved:", { center, zoom, bounds })
+  }, [])
+
+  const handleHeatTileClick = React.useCallback((bin: HeatMapBin) => {
+    setSelectedHeatTile(bin)
+    console.log("Heat tile clicked:", bin)
+  }, [])
+
+  const handleDropZoneClick = React.useCallback((zone: DropZone) => {
+    setSelectedDropZone(zone)
+    console.log("Drop zone clicked:", zone)
+  }, [])
+
+  const handleDropZoneCheckIn = React.useCallback((zoneId: string, lat: number, lng: number) => {
+    console.log("Check-in requested:", { zoneId, lat, lng })
+    // Simulate check-in process
+    setIsLoading(true)
+    setTimeout(() => {
+      setIsLoading(false)
+      // In Phase B, this will be a real API call
+      alert(`Successfully checked into zone ${zoneId}!`)
+    }, 2000)
+  }, [])
+
+  const handleDropZoneJoin = React.useCallback((zoneId: string) => {
+    console.log("Join zone requested:", zoneId)
+    // In Phase B, this will be a real API call
+    alert(`Joined zone ${zoneId}!`)
+  }, [])
+
   const getActivityIcon = (type: string) => {
     switch (type) {
       case "drop": return <Flame size={16} className="text-heat" />
@@ -132,23 +181,45 @@ export default function HeatMapPage() {
 
       {/* Filter Tabs */}
       <motion.div
-        className="flex gap-2 overflow-x-auto pb-2"
+        className="space-y-4"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.2 }}
       >
-        {filters.map((filter) => (
-          <Button
-            key={filter.id}
-            variant={selectedFilter === filter.id ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setSelectedFilter(filter.id)}
-            className="flex items-center gap-2 whitespace-nowrap"
-          >
-            <filter.icon size={16} />
-            {filter.label}
-          </Button>
-        ))}
+        {/* Activity Type Filters */}
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {filters.map((filter) => (
+            <Button
+              key={filter.id}
+              variant={selectedFilter === filter.id ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setSelectedFilter(filter.id)}
+              className="flex items-center gap-2 whitespace-nowrap"
+            >
+              <filter.icon size={16} />
+              {filter.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Time Window Filters */}
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          <span className="text-sm text-muted-foreground flex items-center mr-2">
+            Time Window:
+          </span>
+          {timeFilters.map((filter) => (
+            <Button
+              key={filter.id}
+              variant={timeWindow === filter.id ? "default" : "outline"}
+              size="sm"
+              onClick={() => setTimeWindow(filter.id)}
+              className="flex items-center gap-2 whitespace-nowrap"
+            >
+              <filter.icon size={14} />
+              {filter.label}
+            </Button>
+          ))}
+        </div>
       </motion.div>
 
       {/* Main Heat Map */}
@@ -166,15 +237,123 @@ export default function HeatMapPage() {
           </CardHeader>
           <CardContent className="p-0">
             <HeatMap 
-              zones={mockHeatZones}
-              onZoneClick={(zone) => {
-                // TODO: Handle zone selection
-                // Zone selection logic would go here
-              }}
+              heatMapData={mockHeatMapData}
+              dropZones={mockDropZones}
+              center={mapCenter}
+              zoom={mapZoom}
+              timeWindow={timeWindow}
+              showDropZones={true}
+              isLoading={isLoading}
+              enableGeolocation={true}
+              onMapMove={handleMapMove}
+              onHeatTileClick={handleHeatTileClick}
+              onDropZoneClick={handleDropZoneClick}
+              onDropZoneCheckIn={handleDropZoneCheckIn}
+              onDropZoneJoin={handleDropZoneJoin}
+              className="h-[500px]"
             />
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Selected Map Data */}
+      {(selectedHeatTile || selectedDropZone) && (
+        <motion.div
+          className="grid md:grid-cols-2 gap-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.35 }}
+        >
+          {/* Selected Heat Tile Details */}
+          {selectedHeatTile && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Flame size={20} className="text-orange-500" />
+                  Heat Tile Details
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 bg-accent/50 rounded-lg">
+                    <div className="text-2xl font-bold text-orange-500">{selectedHeatTile.signal_count}</div>
+                    <div className="text-sm text-muted-foreground">Signals</div>
+                  </div>
+                  <div className="text-center p-3 bg-accent/50 rounded-lg">
+                    <div className="text-2xl font-bold text-green-500">{selectedHeatTile.post_count}</div>
+                    <div className="text-sm text-muted-foreground">Posts</div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Top Brands:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedHeatTile.top_brands.map((brand) => (
+                      <span key={brand.brand} className="px-2 py-1 bg-amber-900/30 text-amber-200 rounded text-xs">
+                        {brand.brand} ({brand.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSelectedHeatTile(null)}
+                  className="w-full"
+                >
+                  Close Details
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Selected Drop Zone Details */}
+          {selectedDropZone && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MapPin size={20} className="text-emerald-500" />
+                  {selectedDropZone.name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">{selectedDropZone.description}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 bg-accent/50 rounded-lg">
+                    <div className="text-2xl font-bold text-emerald-500">{selectedDropZone.member_count}</div>
+                    <div className="text-sm text-muted-foreground">Members</div>
+                  </div>
+                  <div className="text-center p-3 bg-accent/50 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-500">{selectedDropZone.check_in_count}</div>
+                    <div className="text-sm text-muted-foreground">Check-ins</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className={cn(
+                    "w-3 h-3 rounded-full",
+                    selectedDropZone.status === "active" ? "bg-emerald-500" :
+                    selectedDropZone.status === "scheduled" ? "bg-yellow-500" : "bg-gray-500"
+                  )} />
+                  <span className="capitalize">{selectedDropZone.status}</span>
+                  {selectedDropZone.distance_from_user && (
+                    <>
+                      <span>•</span>
+                      <span>{selectedDropZone.distance_from_user}m away</span>
+                    </>
+                  )}
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSelectedDropZone(null)}
+                  className="w-full"
+                >
+                  Close Details
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </motion.div>
+      )}
 
       {/* Recent Activity Feed */}
       <motion.div

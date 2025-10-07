@@ -1,6 +1,6 @@
 
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, Index, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -18,6 +18,8 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)
     bio = Column(Text, nullable=True)
     location = Column(String(100), nullable=True)
+    home_city = Column(String(100), nullable=True)
+    privacy_level = Column(Enum('public', 'pseudonymous', 'anon', name='privacy_level_enum'), nullable=False, default='public')
     website_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -33,6 +35,7 @@ class User(Base):
     
     # Relationships
     posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    signals = relationship("Signal", back_populates="user", cascade="all, delete-orphan")
     laces_transactions = relationship("LacesLedger", back_populates="user", cascade="all, delete-orphan")
     
     __table_args__ = (
