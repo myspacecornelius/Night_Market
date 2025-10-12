@@ -1,22 +1,22 @@
-# 🔥 DHARMA
+# 🔥 Night Market
 ## *The Underground Network for Sneaker Culture*
 
 [![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
-[![CI](https://github.com/myspacecornelius/Dharma/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/myspacecornelius/Dharma/actions/workflows/ci-cd.yml)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/myspacecornelius/Dharma)
+[![CI](https://github.com/myspacecornelius/Night Market/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/myspacecornelius/Night Market/actions/workflows/ci-cd.yml)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/myspacecornelius/Night Market)
 
 ---
 
 > *"In a world of bots and backdoors, we're building something different.  
 > A place where sneaker culture thrives on community, not just code.  
 > Where your contribution matters more than your connections.  
-> Welcome to Dharma."*
+> Welcome to Night Market."*
 
 ---
 
 ## 🌟 The Vision
 
-**Dharma isn't just another sneaker bot.** It's the foundation for a new kind of sneaker community—one that rewards authenticity, celebrates local culture, and puts power back in the hands of real enthusiasts.
+**Night Market isn't just another sneaker bot.** It's the foundation for a new kind of sneaker community—one that rewards authenticity, celebrates local culture, and puts power back in the hands of real enthusiasts.
 
 ### What We're Building
 
@@ -28,12 +28,12 @@
 
 ### Why It Matters
 
-The sneaker game has been hijacked by corporate interests and exclusive access. **Dharma brings it back to the streets.** We're creating infrastructure that serves the community, not just the highest bidder.
+The sneaker game has been hijacked by corporate interests and exclusive access. **Night Market brings it back to the streets.** We're creating infrastructure that serves the community, not just the highest bidder.
 
 ---
 
 ## 🚀 Quick Start
-*Get Dharma running in under 3 minutes*
+*Get Night Market running in under 3 minutes*
 
 ### Prerequisites
 - Docker Desktop installed and running
@@ -43,9 +43,9 @@ The sneaker game has been hijacked by corporate interests and exclusive access. 
 ### The 3-Step Onboarding
 
 ```bash
-# 1️⃣ Clone and enter Dharma
-git clone https://github.com/myspacecornelius/Dharma.git
-cd Dharma
+# 1️⃣ Clone and enter Night Market
+git clone https://github.com/myspacecornelius/Night Market.git
+cd Night Market
 
 # 2️⃣ Set up your environment  
 make setup
@@ -54,7 +54,7 @@ make setup
 make up
 ```
 
-**That's it.** Open your browser to `http://localhost:5173` and witness Dharma come alive.
+**That's it.** Open your browser to `http://localhost:5173` and witness Night Market come alive.
 
 ### What You'll See
 
@@ -110,8 +110,8 @@ make clean     # 🧹 Clean slate reset
 ### Project Structure
 
 ```
-dharma/
-├── 🎨 frontend/          # React app - where users experience Dharma
+Night Market/
+├── 🎨 frontend/          # React app - where users experience Night Market
 ├── 🔌 backend/           # FastAPI core - the community engine
 │   ├── api/             # REST endpoints
 │   ├── models/          # Database schemas  
@@ -193,7 +193,7 @@ dharma/
 ---
 
 ## 🔧 Configuration
-*Customize your Dharma experience*
+*Customize your Night Market experience*
 
 ### Environment Variables
 
@@ -201,7 +201,7 @@ Copy `.env.example` to `.env` and customize:
 
 ```bash
 # 🗄️ Database
-DATABASE_URL=postgresql://dharma:password@postgres:5432/dharma
+DATABASE_URL=postgresql://Night Market:password@postgres:5432/Night Market
 
 # ⚡ Cache  
 REDIS_URL=redis://redis:6379/0
@@ -230,7 +230,7 @@ DEMO_POSTS_COUNT=200
 ---
 
 ## 🚀 Deployment
-*Take Dharma to production*
+*Take Night Market to production*
 
 ### Docker Compose (Recommended)
 
@@ -241,7 +241,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### Cloud Deployment
 
-Dharma is designed to run anywhere:
+Night Market is designed to run anywhere:
 
 - **☁️ AWS**: ECS, RDS, ElastiCache
 - **🌊 DigitalOcean**: App Platform, Managed Databases  
@@ -273,10 +273,10 @@ Dharma is designed to run anywhere:
 
 ### Connect With Us
 
-- **💬 Discord**: [Join our community](https://discord.gg/dharma)
-- **🐦 Twitter**: [@DharmaNetwork](https://twitter.com/dharmanetwork)
-- **📧 Email**: community@dharma.network
-- **🌐 Website**: [dharma.network](https://dharma.network)
+- **💬 Discord**: [Join our community](https://discord.gg/Night Market)
+- **🐦 Twitter**: [@Night MarketNetwork](https://twitter.com/Night Marketnetwork)
+- **📧 Email**: community@Night Market.network
+- **🌐 Website**: [Night Market.network](https://Night Market.network)
 
 ### Support the Project
 
@@ -298,8 +298,8 @@ Built with ❤️ by the sneaker community, for the sneaker community.
 ## 🔥 Ready to Build?
 
 ```bash
-git clone https://github.com/myspacecornelius/Dharma.git
-cd Dharma
+git clone https://github.com/myspacecornelius/Night Market.git
+cd Night Market
 make setup && make up
 ```
 
@@ -308,4 +308,4 @@ make setup && make up
 ---
 
 *"The best way to predict the future is to build it."*  
-*— The Dharma Community*
+*— The Night Market Community*
