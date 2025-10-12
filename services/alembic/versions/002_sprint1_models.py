@@ -27,7 +27,10 @@ def upgrade():
         'HEAT_CHECK', 'DROP_ALERT', 'GENERAL',
         name='signal_type_enum'
     )
-    signal_type_enum.create(op.get_bind())
+    try:
+        signal_type_enum.create(op.get_bind())
+    except:
+        pass  # Enum might already exist
     
     # Create visibility enum (if not exists from posts)
     visibility_enum = sa.Enum('public', 'local', 'followers', 'private', name='visibility_enum')
@@ -41,7 +44,10 @@ def upgrade():
         'upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended',
         name='drop_status_enum'
     )
-    drop_status_enum.create(op.get_bind())
+    try:
+        drop_status_enum.create(op.get_bind())
+    except:
+        pass  # Enum might already exist
     
     # Create retailer_type enum
     retailer_type_enum = sa.Enum(
@@ -49,7 +55,10 @@ def upgrade():
         'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER',
         name='retailer_type_enum'
     )
-    retailer_type_enum.create(op.get_bind())
+    try:
+        retailer_type_enum.create(op.get_bind())
+    except:
+        pass  # Enum might already exist
     
     # Create signals table
     op.create_table('signals',
@@ -58,7 +67,7 @@ def upgrade():
         sa.Column('geom', Geography(geometry_type='POINT', srid=4326), nullable=False),
         sa.Column('geohash', sa.String(12), nullable=False),
         sa.Column('city', sa.String(100), nullable=True),
-        sa.Column('signal_type', signal_type_enum, nullable=False),
+        sa.Column('signal_type', sa.Enum('SPOTTED', 'STOCK_CHECK', 'LINE_UPDATE', 'INTEL_REPORT', 'HEAT_CHECK', 'DROP_ALERT', 'GENERAL', name='signal_type_enum', create_type=False), nullable=False),
         sa.Column('text_content', sa.Text, nullable=True),
         sa.Column('media_url', sa.String(500), nullable=True),
         sa.Column('store_id', UUID(as_uuid=True), nullable=True),  # FK will be added after stores table
@@ -76,7 +85,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('visibility', visibility_enum, nullable=False, default='public')
+        sa.Column('visibility', sa.Enum('public', 'local', 'followers', 'private', name='visibility_enum', create_type=False), nullable=False, default='public')
     )
     
     # Create stores table
@@ -90,7 +99,7 @@ def upgrade():
         sa.Column('state', sa.String(50), nullable=True),
         sa.Column('country', sa.String(50), nullable=False, default='US'),
         sa.Column('postal_code', sa.String(20), nullable=True),
-        sa.Column('retailer_type', retailer_type_enum, nullable=False),
+        sa.Column('retailer_type', sa.Enum('NIKE', 'ADIDAS', 'FOOTLOCKER', 'FINISH_LINE', 'CHAMPS', 'FOOTACTION', 'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER', name='retailer_type_enum', create_type=False), nullable=False),
         sa.Column('phone', sa.String(20), nullable=True),
         sa.Column('website_url', sa.String(500), nullable=True),
         sa.Column('social_links', JSON, nullable=True),
@@ -118,7 +127,7 @@ def upgrade():
         sa.Column('estimated_stock', sa.Integer, nullable=True),
         sa.Column('image_url', sa.String(500), nullable=True),
         sa.Column('images', ARRAY(sa.String), nullable=True),
-        sa.Column('status', drop_status_enum, nullable=False, default='upcoming'),
+        sa.Column('status', sa.Enum('upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended', name='drop_status_enum', create_type=False), nullable=False, default='upcoming'),
         sa.Column('regions', ARRAY(sa.String), nullable=True),
         sa.Column('release_type', sa.String(50), nullable=True),
         sa.Column('links', JSON, nullable=True),

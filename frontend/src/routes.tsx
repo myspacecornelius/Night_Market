@@ -3,12 +3,12 @@ import { createBrowserRouter } from 'react-router-dom';
 
 // Existing Pages
 const AppShell = lazy(() => import('./layouts/AppShell'));
-const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const Dashboard = lazy(() => import('@/app/routes/dashboard'));
 const Heatmap = lazy(() => import('@/pages/Heatmap'));
 const Laces = lazy(() => import('@/pages/Laces'));
 const Dropzones = lazy(() => import('@/pages/Dropzones'));
 const ThriftRoutes = lazy(() => import('@/pages/ThriftRoutes'));
-const Profile = lazy(() => import('@/pages/Profile'));
+const Profile = lazy(() => import('@/app/routes/profile'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
 const ProtectedRoute = lazy(() => import('./auth/ProtectedRoute'));
