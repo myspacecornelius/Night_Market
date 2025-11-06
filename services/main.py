@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 try:
@@ -9,6 +9,7 @@ try:
     from .routers import hyperlocal, shop
     from .core.redis_client import get_redis
     from .middleware.rate_limit import RateLimitMiddleware
+    from .core.exceptions import NightMarketException
 except ImportError:
     # When running directly in Docker
     from routers import router as api_router
@@ -56,6 +57,31 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Rate limiting disabled: {e}")
     logger.info("🔧 Continuing without rate limiting in development mode")
+
+# Custom exception handlers
+@app.exception_handler(NightMarketException)
+async def night_market_exception_handler(request: Request, exc: NightMarketException):
+    """Handle custom Night Market exceptions"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.__class__.__name__,
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "InternalServerError",
+            "message": "An unexpected error occurred"
+        }
+    )
 
 @app.on_event("startup")
 async def startup_event():
