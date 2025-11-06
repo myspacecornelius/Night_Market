@@ -48,7 +48,7 @@ def delete_release(release_id: uuid.UUID, db: Session = Depends(get_db)):
 @router.get("/upcoming", response_model=List[schemas.Release])
 def get_upcoming_releases(from_date: Optional[datetime] = None, to_date: Optional[datetime] = None, db: Session = Depends(get_db)):
     if from_date is None:
-        from_date = datetime.utcnow()
+        from_date = datetime.now(timezone.utc)
     if to_date is None:
         to_date = from_date + timedelta(days=90)
     

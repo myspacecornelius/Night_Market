@@ -1,0 +1,134 @@
+# Night Market Pre-commit Hooks Configuration
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run: pre-commit run --all-files
+
+repos:
+  # Python Code Formatting
+  - repo: https://github.com/psf/black
+    rev: 25.9.0
+    hooks:
+      - id: black
+        name: Format Python code with Black
+        language_version: python3.11
+        args: ['--line-length=100']
+        files: ^(services|worker|tests)/.*\.py$
+
+  # Python Linting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.0
+    hooks:
+      - id: ruff
+        name: Lint Python code with Ruff
+        args: ['--fix', '--exit-non-zero-on-fix']
+        files: ^(services|worker|tests)/.*\.py$
+
+  # Python Import Sorting
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: Sort Python imports
+        args: ['--profile', 'black', '--line-length=100']
+        files: ^(services|worker|tests)/.*\.py$
+
+  # Python Type Checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        name: Type check Python code
+        additional_dependencies: [types-all]
+        args: ['--ignore-missing-imports', '--python-version=3.11']
+        files: ^(services|worker)/.*\.py$
+
+  # General File Checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        name: Remove trailing whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        name: Ensure files end with newline
+      - id: check-yaml
+        name: Check YAML syntax
+        args: ['--unsafe']  # Allow custom YAML tags
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-toml
+        name: Check TOML syntax
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: check-case-conflict
+        name: Check for case conflicts
+      - id: mixed-line-ending
+        name: Check for mixed line endings
+        args: ['--fix=lf']
+      - id: detect-private-key
+        name: Detect private keys
+      - id: check-executables-have-shebangs
+        name: Check executables have shebangs
+
+  # Python Security Checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8
+    hooks:
+      - id: bandit
+        name: Security check with Bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ['bandit[toml]']
+        files: ^(services|worker)/.*\.py$
+
+  # Markdown Linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.40.0
+    hooks:
+      - id: markdownlint
+        name: Lint Markdown files
+        args: ['--fix']
+        files: \.md$
+
+  # Docker Linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        name: Lint Dockerfiles
+        files: Dockerfile.*
+
+  # Secrets Detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: Detect secrets in code
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock.json
+
+# Configuration for specific hooks
+default_language_version:
+  python: python3.11
+
+# Files to exclude from all hooks
+exclude: |
+  (?x)^(
+      \.git/|
+      \.github/|
+      \.venv/|
+      venv/|
+      node_modules/|
+      __pycache__/|
+      \.pyc$|
+      \.pyo$|
+      \.pyd$|
+      frontend/node_modules/|
+      frontend/dist/|
+      frontend/build/|
+      \.egg-info/|
+      alembic/versions/.*\.py$|
+      migrations/
+  )

@@ -131,7 +131,7 @@ class Signal(Base):
         """Check if signal has expired"""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     def is_active(self) -> bool:
         """Check if signal is active (not flagged, not expired, visible)"""

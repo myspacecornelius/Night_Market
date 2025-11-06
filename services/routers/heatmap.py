@@ -32,7 +32,7 @@ class HeatMapBin(BaseModel):
 
 def get_time_window_start(window: str) -> datetime:
     """Convert time window string to datetime start"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if window == "1h":
         return now - timedelta(hours=1)
     elif window == "24h":

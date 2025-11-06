@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, and_, or_
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, UUID4
 import uuid
 import math
@@ -10,6 +10,7 @@ import math
 from services.database import get_db
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, DropZoneStatus, MemberRole
 from services.models.user import User
+from services.core.security import get_current_user
 
 router = APIRouter()
 
@@ -68,12 +69,11 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
 @router.post("/v1/dropzones", response_model=DropZoneResponse)
 async def create_dropzone(
     dropzone_data: DropZoneCreate,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication to get current_user
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Create a new dropzone"""
-    # For now, use a placeholder user ID - in production this would come from auth
-    owner_id = uuid.uuid4()  # TODO: Replace with current_user.user_id
+    owner_id = current_user.user_id
     
     # Create PostGIS point for center
     center_point_wkt = f"POINT({dropzone_data.center_lng} {dropzone_data.center_lat})"
@@ -144,7 +144,7 @@ async def list_dropzones(
     # Filter by status if active parameter provided
     if active is not None:
         if active:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             query = query.filter(
                 and_(
                     DropZone.status == DropZoneStatus.ACTIVE,
@@ -213,49 +213,48 @@ async def list_dropzones(
 async def check_in_to_dropzone(
     dropzone_id: UUID4,
     check_in_data: CheckInRequest,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication to get current_user
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Check in to a dropzone with location verification"""
     # Get dropzone
     dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
     if not dropzone:
         raise HTTPException(status_code=404, detail="Dropzone not found")
-    
+
     # Check if dropzone is active
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if dropzone.status != DropZoneStatus.ACTIVE:
         raise HTTPException(status_code=400, detail="Dropzone is not active")
-    
+
     if dropzone.starts_at and dropzone.starts_at > now:
         raise HTTPException(status_code=400, detail="Dropzone has not started yet")
-    
+
     if dropzone.ends_at and dropzone.ends_at < now:
         raise HTTPException(status_code=400, detail="Dropzone has ended")
-    
+
     # Get dropzone center coordinates
     coords_result = db.execute(
         text("SELECT ST_X(:point) as lng, ST_Y(:point) as lat"),
         {"point": dropzone.center_point}
     ).fetchone()
-    
+
     center_lat, center_lng = coords_result.lat, coords_result.lng
-    
+
     # Calculate distance from center using haversine formula
     distance = haversine_distance(
         check_in_data.lat, check_in_data.lng,
         center_lat, center_lng
     )
-    
+
     # Verify user is within check-in radius
     if distance > dropzone.check_in_radius:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Too far from dropzone. Distance: {distance:.1f}m, Required: {dropzone.check_in_radius}m"
         )
-    
-    # TODO: Get current user from authentication
-    user_id = uuid.uuid4()  # Placeholder
+
+    user_id = current_user.user_id
     
     # Check if user already checked in today
     today = datetime.now().date()
@@ -393,11 +392,11 @@ async def get_dropzone_details(
 @router.post("/v1/dropzones/{dropzone_id}/join")
 async def join_dropzone(
     dropzone_id: UUID4,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Join a dropzone as a member"""
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     # Check if already a member
     existing_member = db.query(DropZoneMember).filter(

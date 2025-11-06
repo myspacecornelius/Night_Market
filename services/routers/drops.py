@@ -104,7 +104,7 @@ async def list_drops(
     
     # Default date range if no dates specified (next 4 weeks)
     if not from_date and not to_date:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         future_date = now + timedelta(weeks=4)
         query = query.filter(
             or_(
@@ -284,7 +284,7 @@ async def get_city_calendar(
     """Get drop calendar for a specific city"""
     
     # Calculate date range
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     end_date = now + timedelta(weeks=weeks)
     
     # Query drops in this city
@@ -332,7 +332,7 @@ async def get_city_calendar(
 async def get_drops_stats(db: Session = Depends(get_db)):
     """Get overall drop statistics"""
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # Basic counts
     total_drops = db.query(Drop).count()

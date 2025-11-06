@@ -11,6 +11,7 @@ from services.models.laces import LacesLedger as LacesLedgerModel
 from services.models.user import User
 from services.models.post import Post
 from services.models.dropzone import DropZoneCheckIn
+from services.core.security import get_current_user, get_current_admin_user
 
 router = APIRouter()
 
@@ -155,11 +156,11 @@ async def calculate_earning_opportunities(
 # API Endpoints
 @router.get("/laces/balance", response_model=LacesBalance)
 async def get_laces_balance(
-    db: Session = Depends(get_db)
-    # TODO: Add authentication to get current_user
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get current LACES balance for user"""
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -201,11 +202,11 @@ async def get_laces_ledger(
     page: int = Query(1, ge=1),
     limit: int = Query(20, le=100),
     transaction_type: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get LACES transaction history for user"""
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     query = db.query(LacesLedgerModel).filter(LacesLedgerModel.user_id == user_id)
     
@@ -252,13 +253,12 @@ async def get_laces_ledger(
 @router.post("/laces/grant")
 async def grant_laces_admin(
     grant_request: GrantLacesRequest,
-    db: Session = Depends(get_db)
-    # TODO: Add admin authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
 ):
     """
-    Grant LACES tokens (admin/task only)
+    Grant LACES tokens (admin only)
     """
-    # TODO: Verify admin permissions or task auth
     
     result = await grant_laces(
         db=db,
@@ -273,13 +273,13 @@ async def grant_laces_admin(
 
 @router.post("/laces/daily-stipend")
 async def claim_daily_stipend(
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Claim daily LACES stipend (100 LACES per day)
     """
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     # Check if already claimed today
     today = datetime.now().date()
@@ -310,13 +310,13 @@ async def claim_daily_stipend(
 
 @router.get("/laces/opportunities")
 async def get_earning_opportunities(
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get available LACES earning opportunities for the user
     """
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     opportunities = await calculate_earning_opportunities(db, user_id)
     
@@ -326,13 +326,13 @@ async def get_earning_opportunities(
 async def boost_post_with_laces(
     post_id: UUID4,
     boost_amount: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Boost a post using LACES tokens
     """
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     # Verify user has enough LACES
     user = db.query(User).filter(User.user_id == user_id).first()

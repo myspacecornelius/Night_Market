@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from jose import JWTError, jwt
@@ -27,21 +27,21 @@ class TokenPair:
     """Container for access and refresh token pair"""
     def __init__(self, access_token: str, refresh_token: str, token_type: str = "bearer"):
         self.access_token = access_token
-        self.refresh_token = refresh_token  
+        self.refresh_token = refresh_token
         self.token_type = token_type
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token"""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
     to_encode.update({
         "exp": expire,
         "type": "access",
-        "iat": datetime.utcnow()
+        "iat": datetime.now(timezone.utc)
     })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -103,7 +103,7 @@ def create_user_session(
         device_fingerprint=device_fingerprint,
         ip_address=ip_address,
         user_agent=user_agent,
-        expires_at=datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     )
     
     db.add(session)
@@ -125,7 +125,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         )
     
     # Update last active time
-    user.last_active_at = datetime.utcnow()
+    user.last_active_at = datetime.now(timezone.utc)
     db.commit()
     
     return user
@@ -163,7 +163,7 @@ def validate_refresh_token(db: Session, refresh_token: str) -> Optional[UserSess
         return None
     
     # Update last used time
-    session.last_used_at = datetime.utcnow()
+    session.last_used_at = datetime.now(timezone.utc)
     db.commit()
     
     return session
@@ -184,7 +184,7 @@ def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):
 def cleanup_expired_sessions(db: Session) -> int:
     """Clean up expired sessions (run periodically)"""
     expired_sessions = db.query(UserSession).filter(
-        UserSession.expires_at < datetime.utcnow(),
+        UserSession.expires_at < datetime.now(timezone.utc),
         UserSession.is_revoked == '0'
     ).all()
     

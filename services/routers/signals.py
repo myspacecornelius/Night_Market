@@ -99,7 +99,7 @@ async def create_signal(
     recent_signals = db.query(Signal).filter(
         and_(
             Signal.user_id == current_user.user_id,
-            Signal.created_at >= datetime.utcnow() - timedelta(minutes=15)
+            Signal.created_at >= datetime.now(timezone.utc) - timedelta(minutes=15)
         )
     ).count()
     
@@ -129,7 +129,7 @@ async def create_signal(
     
     # Set expiration if specified
     if signal_data.expires_hours:
-        signal.expires_at = datetime.utcnow() + timedelta(hours=signal_data.expires_hours)
+        signal.expires_at = datetime.now(timezone.utc) + timedelta(hours=signal_data.expires_hours)
     
     # Generate dedupe hash
     signal.generate_dedupe_hash_for_instance()
@@ -138,7 +138,7 @@ async def create_signal(
     duplicate = db.query(Signal).filter(
         and_(
             Signal.dedupe_hash == signal.dedupe_hash,
-            Signal.created_at >= datetime.utcnow() - timedelta(hours=1)
+            Signal.created_at >= datetime.now(timezone.utc) - timedelta(hours=1)
         )
     ).first()
     
@@ -206,7 +206,7 @@ async def list_signals(
     # Calculate time window
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     
     # Base query for active signals
     query = db.query(Signal).filter(
@@ -318,7 +318,7 @@ async def get_signal_heatmap(
         return JSONResponse(content=json.loads(cached_data))
     
     # If not cached, generate heatmap data
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     
     # Query active signals
     query = db.query(Signal).filter(
@@ -424,7 +424,7 @@ async def get_signal_stats(
     # Parse time window
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     
     # Basic stats
     total_signals = db.query(Signal).filter(Signal.created_at >= cutoff_time).count()
