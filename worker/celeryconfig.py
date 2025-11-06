@@ -79,6 +79,16 @@ beat_schedule = {
         'task': 'tasks.cleanup_old_data',
         'schedule': 86400.0,  # Daily
         'options': {'queue': 'maintenance'}
+    },
+    'daily-laces-stipend': {
+        'task': 'tasks.daily_laces_stipend',
+        'schedule': 86400.0,  # Daily at midnight UTC
+        'options': {'queue': 'default'}
+    },
+    'refresh-heatmap-cache': {
+        'task': 'tasks.refresh_heatmap_cache',
+        'schedule': 300.0,  # Every 5 minutes
+        'options': {'queue': 'default'}
     }
 }
 

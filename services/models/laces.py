@@ -12,13 +12,15 @@ class LacesLedger(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.user_id', ondelete="CASCADE"), nullable=False, index=True)
     amount = Column(Integer, nullable=False)
     transaction_type = Column(
-        Enum('DAILY_STIPEND', 'BOOST_SENT', 'BOOST_RECEIVED', 'SIGNAL_REWARD', 'ADMIN_ADD', 'ADMIN_REMOVE', 
-             'PURCHASE', 'REFUND', 'CONTEST_REWARD', 'CHECKOUT_TASK_PURCHASE', 'CHECKOUT_TASK_REFUND', name='transaction_type_enum'),
+        Enum('DAILY_STIPEND', 'BOOST_SENT', 'BOOST_RECEIVED', 'SIGNAL_REWARD', 'ADMIN_ADD', 'ADMIN_REMOVE',
+             'PURCHASE', 'REFUND', 'CONTEST_REWARD', 'CHECKOUT_TASK_PURCHASE', 'CHECKOUT_TASK_REFUND',
+             'POST_REWARD', 'CHECKIN_REWARD', name='transaction_type_enum'),
         nullable=False
     )
     related_post_id = Column(UUID(as_uuid=True), ForeignKey('posts.post_id', ondelete="SET NULL"), nullable=True)
     description = Column(Text, nullable=True)
     reference_id = Column(String(100), nullable=True)  # External reference for tracking
+    balance_after = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
