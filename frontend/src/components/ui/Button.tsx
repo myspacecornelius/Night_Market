@@ -64,23 +64,36 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ 
-        className, 
-        variant, 
-        size, 
-        asChild = false, 
+    ({
+        className,
+        variant,
+        size,
+        asChild = false,
         loading = false,
         leftIcon,
         rightIcon,
         children,
         disabled,
-        ...props 
+        ...props
     }, ref) => {
-        const Comp = asChild ? Slot : motion.button
         const isDisabled = disabled || loading
-        
+
+        // When asChild is true, use Slot and don't apply motion props
+        if (asChild) {
+            return (
+                <Slot
+                    className={cn(buttonVariants({ variant, size, className }))}
+                    ref={ref}
+                    {...props}
+                >
+                    {children}
+                </Slot>
+            )
+        }
+
+        // Otherwise use motion.button with animations
         return (
-            <Comp
+            <motion.button
                 className={cn(buttonVariants({ variant, size, className }))}
                 ref={ref}
                 disabled={isDisabled}
@@ -110,7 +123,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                         {rightIcon}
                     </span>
                 )}
-            </Comp>
+            </motion.button>
         )
     }
 )
