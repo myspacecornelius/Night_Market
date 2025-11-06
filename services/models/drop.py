@@ -93,7 +93,7 @@ class Drop(Base):
     def is_upcoming(self) -> bool:
         """Check if drop is upcoming"""
         return self.status == DropStatus.UPCOMING and (
-            not self.release_at or self.release_at > datetime.utcnow()
+            not self.release_at or self.release_at > datetime.now(timezone.utc)
         )
     
     def is_live(self) -> bool:
@@ -125,7 +125,7 @@ class Drop(Base):
         if not self.release_at:
             return {"status": "no_date"}
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self.release_at <= now:
             return {"status": "live_or_past"}
         

@@ -157,7 +157,7 @@ class SignalAggregator:
         cutoff_time = None
         
         if time_window_hours:
-            cutoff_time = datetime.utcnow() - timedelta(hours=time_window_hours)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
         
         for signal in signals:
             # Filter by time window if specified

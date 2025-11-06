@@ -84,7 +84,7 @@ SNEAKER_POSTS = [
 
 def seed_data():
     """
-    🌱 Seed Dharma with compelling sneaker community demo data
+    🌱 Seed Night Market with compelling sneaker community demo data
     Creates a vibrant underground network across major cities
     """
     # Check if seeding is enabled
@@ -92,7 +92,7 @@ def seed_data():
         print("🚫 Auto-seeding disabled via AUTO_SEED_DATA env var")
         return
 
-    print("🌱 Seeding Dharma with sneaker community data...")
+    print("🌱 Seeding Night Market with sneaker community data...")
     db: Session = SessionLocal()
 
     try:
@@ -112,10 +112,10 @@ def seed_data():
         # Boston Ambassador
         boston_ambassador = User(
             username="boston_kicks_og",
-            email="boston@dharma.community",
+            email="boston@nightmarket.community",
             display_name="Boston Kicks OG",
             avatar_url="https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400",
-            password_hash=get_password_hash("dharma2024"),
+            password_hash=get_password_hash("nightmarket2024"),
             is_anonymous=False,
             laces_balance=2500  # Veteran status
         )
@@ -123,10 +123,10 @@ def seed_data():
         # NYC Ambassador  
         nyc_ambassador = User(
             username="nyc_heat_hunter",
-            email="nyc@dharma.community", 
+            email="nyc@nightmarket.community", 
             display_name="NYC Heat Hunter",
             avatar_url="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
-            password_hash=get_password_hash("dharma2024"),
+            password_hash=get_password_hash("nightmarket2024"),
             is_anonymous=False,
             laces_balance=3001  # Top tier
         )
@@ -134,10 +134,10 @@ def seed_data():
         # LA Ambassador
         la_ambassador = User(
             username="la_streetwear_king",
-            email="la@dharma.community",
+            email="la@nightmarket.community",
             display_name="LA Streetwear King", 
             avatar_url="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400",
-            password_hash=get_password_hash("dharma2024"),
+            password_hash=get_password_hash("nightmarket2024"),
             is_anonymous=False,
             laces_balance=2800
         )
@@ -163,7 +163,7 @@ def seed_data():
                 email=fake.email(),
                 display_name=fake.name(),
                 avatar_url=f"https://images.unsplash.com/photo-{1500000000 + i}?w=400",
-                password_hash=get_password_hash("dharma2024"),
+                password_hash=get_password_hash("nightmarket2024"),
                 is_anonymous=random.choice([True, False]),
                 laces_balance=random.randint(50, 1500)
             )
@@ -274,7 +274,7 @@ def seed_data():
 
         db.commit()
         
-        print("✅ Dharma seeded successfully!")
+        print("✅ Night Market seeded successfully!")
         print(f"   👥 {len(users)} community members")
         print(f"   📍 {posts_created} location-based posts")
         print(f"   👟 {release_count} upcoming drops")

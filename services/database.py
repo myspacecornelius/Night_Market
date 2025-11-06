@@ -14,7 +14,7 @@ load_dotenv()
 # --- Environment & URL normalization -------------------------------------------------
 # Prefer psycopg3 dialect for Postgres. If a plain postgresql:// URL is provided,
 # auto-upgrade it to postgresql+psycopg:// so SQLAlchemy uses the modern driver.
-raw_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/dharma")
+raw_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/nightmarket")
 if raw_url.startswith("postgresql://") and "+" not in raw_url:
     DATABASE_URL = raw_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 else:
