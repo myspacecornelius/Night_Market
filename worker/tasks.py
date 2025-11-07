@@ -306,30 +306,29 @@ def cleanup_old_data() -> Dict[str, Any]:
 @app.task(bind=True)
 def refresh_heatmap_cache(self, zones: Optional[list] = None) -> Dict[str, Any]:
     """
-    Refresh heatmap cache tiles
-    Can target specific geohash zones or refresh globally
+    Refresh heatmap cache tiles for posts + signals endpoints.
+    Can target specific geohash zones (best-effort) or refresh globally.
     """
     try:
         logger.info("Starting heatmap cache refresh")
         
-        # Clear existing cache
+        # Clear existing cache namespaces (posts + signals heatmaps)
         cache_keys_cleared = 0
-        pattern = "heatmap:*"
-        
-        # If specific zones provided, target those
+        base_patterns = ["heatmap", "signals:heatmap"]
+
+        key_patterns = []
         if zones:
             for zone in zones:
-                zone_pattern = f"heatmap:*:{zone}*"
-                zone_keys = redis_client.keys(zone_pattern)
-                if zone_keys:
-                    redis_client.delete(*zone_keys)
-                    cache_keys_cleared += len(zone_keys)
+                for base in base_patterns:
+                    key_patterns.append(f"{base}:*{zone}*")
         else:
-            # Clear all heatmap cache
-            all_keys = redis_client.keys(pattern)
-            if all_keys:
-                redis_client.delete(*all_keys)
-                cache_keys_cleared = len(all_keys)
+            key_patterns = [f"{base}:*" for base in base_patterns]
+
+        for pattern in key_patterns:
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                cache_keys_cleared += len(keys)
         
         # Pre-warm cache for common zoom levels and time windows
         api_url = os.getenv("API_BASE_URL", "http://api:8000")

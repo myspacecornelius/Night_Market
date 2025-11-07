@@ -6,10 +6,10 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, text, func, desc
+from sqlalchemy import and_, func, desc
 from pydantic import BaseModel, validator
-import json
 
+from services.core.cache import CacheStrategy
 from services.database import get_db
 from services.core.auth import get_current_active_user
 from services.core.redis_client import get_redis
@@ -164,17 +164,11 @@ async def create_signal(
     except Exception:
         pass  # Don't fail request if background task fails
     
-    # Get coordinates for response
-    coords = db.execute(
-        text("SELECT ST_X(:geom) as lng, ST_Y(:geom) as lat"),
-        {"geom": signal.geom}
-    ).fetchone()
-    
     return SignalResponse(
         id=str(signal.id),
         user_id=str(signal.user_id),
-        latitude=coords.lat,
-        longitude=coords.lng,
+        latitude=signal_data.latitude,
+        longitude=signal_data.longitude,
         geohash=signal.geohash,
         signal_type=signal.signal_type,
         text_content=signal.text_content,
@@ -255,23 +249,26 @@ async def list_signals(
     # Get total count
     total = query.count()
     
-    # Apply pagination and ordering
-    signals = query.order_by(desc(Signal.created_at)).offset((page - 1) * per_page).limit(per_page).all()
+    # Include coordinates with pagination
+    signals_with_coords = (
+        query.with_entities(
+            Signal,
+            func.ST_Y(Signal.geom).label("lat"),
+            func.ST_X(Signal.geom).label("lng"),
+        )
+        .order_by(desc(Signal.created_at))
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
     
-    # Convert to response format
     signal_responses = []
-    for signal in signals:
-        # Get coordinates
-        coords = db.execute(
-            text("SELECT ST_X(:geom) as lng, ST_Y(:geom) as lat"),
-            {"geom": signal.geom}
-        ).fetchone()
-        
+    for signal, lat, lng in signals_with_coords:
         signal_responses.append(SignalResponse(
             id=str(signal.id),
             user_id=str(signal.user_id),
-            latitude=coords.lat,
-            longitude=coords.lng,
+            latitude=lat,
+            longitude=lng,
             geohash=signal.geohash,
             signal_type=signal.signal_type,
             text_content=signal.text_content,
@@ -308,88 +305,76 @@ async def get_signal_heatmap(
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
     
-    # Try to get cached data first
     cache_key = f"signals:heatmap:{zoom}:{hours}h"
     if bbox:
         cache_key += f":bbox:{bbox}"
-    
-    cached_data = redis_client.get(cache_key)
-    if cached_data:
-        return JSONResponse(content=json.loads(cached_data))
-    
-    # If not cached, generate heatmap data
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
-    
-    # Query active signals
-    query = db.query(Signal).filter(
-        and_(
-            Signal.created_at >= cutoff_time,
-            Signal.is_flagged == False,
-            Signal.visibility.in_(['public', 'local'])
+
+    tier = "hot" if hours <= 1 else "warm"
+    cache = CacheStrategy(redis_client)
+
+    async def _build_payload():
+        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        query = db.query(Signal).filter(
+            and_(
+                Signal.created_at >= cutoff_time,
+                Signal.is_flagged == False,
+                Signal.visibility.in_(['public', 'local'])
+            )
         )
-    )
-    
-    # Apply bbox filter if provided
-    if bbox:
-        try:
-            min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(','))
-            bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-            query = query.filter(func.ST_Intersects(Signal.geom, bbox_geom))
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Invalid bbox format")
-    
-    signals = query.all()
-    
-    # Convert to dict format for aggregation
-    signal_dicts = []
-    for signal in signals:
-        coords = db.execute(
-            text("SELECT ST_X(:geom) as lng, ST_Y(:geom) as lat"),
-            {"geom": signal.geom}
-        ).fetchone()
-        
-        signal_dicts.append({
-            'id': str(signal.id),
-            'lat': coords.lat,
-            'lng': coords.lng,
-            'geohash': signal.geohash,
-            'signal_type': signal.signal_type,
-            'reputation_score': signal.reputation_score,
-            'brand': signal.brand,
-            'tags': signal.tags or [],
-            'text_content': signal.text_content,
-            'created_at': signal.created_at
-        })
-    
-    # Aggregate by geohash
-    aggregated = SignalAggregator.aggregate_by_geohash(
-        signal_dicts,
-        precision=zoom,
-        time_window_hours=hours
-    )
-    
-    # Filter by bbox if provided
-    if bbox:
-        bbox_list = [float(x) for x in bbox.split(',')]
-        aggregated = SignalAggregator.filter_by_bbox(aggregated, bbox_list)
-    
-    # Get top buckets
-    top_buckets = SignalAggregator.get_top_buckets(aggregated, limit=100)
-    
-    response_data = {
-        "buckets": top_buckets,
-        "total_signals": len(signal_dicts),
-        "total_buckets": len(top_buckets),
-        "time_window": time_window,
-        "zoom_level": zoom,
-        "bbox": bbox.split(',') if bbox else None
-    }
-    
-    # Cache the result
-    cache_ttl = {1: 180, 24: 300, 168: 900}.get(hours, 300)  # Cache TTL based on time window
-    redis_client.setex(cache_key, cache_ttl, json.dumps(response_data, default=str))
-    
-    return JSONResponse(content=response_data)
+
+        if bbox:
+            try:
+                min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(','))
+                bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
+                query = query.filter(func.ST_Intersects(Signal.geom, bbox_geom))
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid bbox format")
+
+        signal_rows = query.with_entities(
+            Signal,
+            func.ST_Y(Signal.geom).label("lat"),
+            func.ST_X(Signal.geom).label("lng"),
+        ).all()
+
+        signal_dicts = [
+            {
+                'id': str(signal.id),
+                'lat': lat,
+                'lng': lng,
+                'geohash': signal.geohash,
+                'signal_type': signal.signal_type,
+                'reputation_score': signal.reputation_score,
+                'brand': signal.brand,
+                'tags': signal.tags or [],
+                'text_content': signal.text_content,
+                'created_at': signal.created_at,
+            }
+            for signal, lat, lng in signal_rows
+        ]
+
+        aggregated = SignalAggregator.aggregate_by_geohash(
+            signal_dicts,
+            precision=zoom,
+            time_window_hours=hours
+        )
+
+        if bbox:
+            bbox_list = [float(x) for x in bbox.split(',')]
+            aggregated = SignalAggregator.filter_by_bbox(aggregated, bbox_list)
+
+        top_buckets = SignalAggregator.get_top_buckets(aggregated, limit=100)
+
+        return {
+            "buckets": top_buckets,
+            "total_signals": len(signal_dicts),
+            "total_buckets": len(top_buckets),
+            "time_window": time_window,
+            "zoom_level": zoom,
+            "bbox": bbox.split(',') if bbox else None
+        }
+
+    payload = await cache.get_or_set(cache_key, loader=_build_payload, tier=tier)
+    return JSONResponse(content=payload)
 
 @router.post("/{signal_id}/boost")
 async def boost_signal(

@@ -1,23 +1,31 @@
 
+import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from pydantic import BaseModel
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from services import models, schemas
 from services.core.database import SessionLocal
 
-import os
+logger = logging.getLogger(__name__)
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "development-only-key-change-in-production")
+DEFAULT_SECRET = "development-only-key-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", DEFAULT_SECRET)
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
-if SECRET_KEY == "development-only-key-change-in-production" and os.getenv("ENVIRONMENT") == "production":
+if SECRET_KEY == DEFAULT_SECRET and os.getenv("ENVIRONMENT") == "production":
     raise ValueError("JWT_SECRET_KEY must be set in production environment")
+
+if len(SECRET_KEY) < 32:
+    raise ValueError("JWT_SECRET_KEY must be at least 32 characters for HMAC signatures.")
+
+if SECRET_KEY == DEFAULT_SECRET:
+    logger.warning("Using development JWT secret – do not use this configuration in production.")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
