@@ -1,14 +1,30 @@
+import { Menu, Search } from 'lucide-react'
+
+import WalletDrawer from '@/components/hyperlocal/WalletDrawer'
 import { Stack } from '@/components/layout/Stack'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/Button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { useAuth } from '@/hooks/useAuth'
 import { useUiStore } from '@/store/ui'
-import { Menu, Search } from 'lucide-react'
-import WalletDrawer from '@/components/hyperlocal/WalletDrawer'
 
 export const Topbar = () => {
   const { toggleSidebar } = useUiStore()
+  const { user, logout } = useAuth()
+
+  const initials = (user?.display_name || user?.username || 'DN')
+    .split(' ')
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('')
 
   return (
     <header className="flex h-14 items-center gap-4 border-b bg-card px-4 md:px-6">
@@ -33,19 +49,29 @@ export const Topbar = () => {
         <DropdownMenuTrigger asChild>
           <Button variant="secondary" size="icon" className="rounded-full">
             <Avatar>
-              <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-              <AvatarFallback>CN</AvatarFallback>
+              <AvatarImage src={user?.avatar_url} alt={user?.username} />
+              <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
             <span className="sr-only">Toggle user menu</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <DropdownMenuLabel>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold">{user?.display_name || user?.username || 'Member'}</span>
+              <span className="text-xs text-muted-foreground">{user?.email}</span>
+            </div>
+          </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem>Profile</DropdownMenuItem>
           <DropdownMenuItem>Settings</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>Logout</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => logout()}
+            className="text-destructive focus:text-destructive"
+          >
+            Logout
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

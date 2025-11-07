@@ -1,13 +1,16 @@
+import { useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { useLocation, useNavigate } from 'react-router-dom'
+import type { Location } from 'react-router-dom'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { motion } from 'framer-motion'
+import { z } from 'zod'
+
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { motion } from 'framer-motion'
-import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import { z } from 'zod'
+import { useAuth } from '@/hooks/useAuth'
 
 const formSchema = z.object({
   email: z.string().email(),
@@ -15,7 +18,10 @@ const formSchema = z.object({
 })
 
 const LoginPage = () => {
+  const { login, isLoading, isAuthenticated } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const redirectPath = (location.state as { from?: Location })?.from?.pathname ?? '/'
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -24,12 +30,19 @@ const LoginPage = () => {
     },
   })
 
-  const onSubmit = (values: z.infer<typeof formSchema>) => {
-    // TODO: Replace with actual auth logic
-    console.log(values)
-    localStorage.setItem('user', JSON.stringify(values))
-    toast.success('Login successful!')
-    navigate('/')
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/', { replace: true })
+    }
+  }, [isAuthenticated, navigate])
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    try {
+      await login(values)
+      navigate(redirectPath, { replace: true })
+    } catch (error) {
+      // errors surfaced via toast in useAuth
+    }
   }
 
   return (
@@ -75,8 +88,8 @@ const LoginPage = () => {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" className="w-full">
-                  Login
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? 'Signing in…' : 'Login'}
                 </Button>
               </form>
             </Form>

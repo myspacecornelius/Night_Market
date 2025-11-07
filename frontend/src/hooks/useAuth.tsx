@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { apiClient, User, AuthTokens } from '@/lib/api-client'
+import { apiClient, User } from '@/lib/api-client'
 import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
 
 interface AuthContextType {
@@ -11,7 +11,7 @@ interface AuthContextType {
   isLoading: boolean
   login: (data: LoginFormData) => Promise<void>
   register: (data: RegisterFormData) => Promise<void>
-  logout: () => void
+  logout: (options?: { silent?: boolean }) => void
   refreshUser: () => Promise<void>
 }
 
@@ -22,7 +22,6 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
 
@@ -47,7 +46,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     staleTime: 5 * 60 * 1000, // 5 minutes
     onError: () => {
       // If fetching user fails, user is not authenticated
-      logout()
+      logout({ silent: true })
     }
   })
 
@@ -69,11 +68,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
       }
     },
-    onSuccess: (tokens) => {
+    onSuccess: () => {
       setIsAuthenticated(true)
       queryClient.invalidateQueries({ queryKey: ['currentUser'] })
       toast.success('Welcome back! 🔥')
-      navigate('/')
     },
     onError: (error: Error) => {
       toast.error(error.message)
@@ -114,7 +112,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     },
     onSuccess: () => {
       toast.success('Account created successfully! Please log in.')
-      navigate('/login')
     },
     onError: (error: Error) => {
       toast.error(error.message)
@@ -129,12 +126,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await registerMutation.mutateAsync(data)
   }
 
-  const logout = () => {
+  const logout = (options?: { silent?: boolean }) => {
     apiClient.logout()
     setIsAuthenticated(false)
     queryClient.clear()
-    toast.success('Logged out successfully')
-    navigate('/login')
+    if (!options?.silent) {
+      toast.success('Logged out successfully')
+    }
   }
 
   const refreshUser = async () => {
