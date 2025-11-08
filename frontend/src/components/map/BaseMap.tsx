@@ -151,7 +151,7 @@ export function BaseMap({
       </div>
       
       {/* Dark overlay for earthy theme enhancement */}
-      <style jsx global>{`
+      <style>{`
         .leaflet-container {
           background: #1a1611 !important;
           font-family: inherit;

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { apiClient, User } from '@/lib/api-client'
 import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
@@ -15,7 +15,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>
 }
 
-const AuthContext = createContext<AuthContextType | null>(null)
+export const AuthContext = createContext<AuthContextType | null>(null)
 
 interface AuthProviderProps {
   children: React.ReactNode
@@ -151,6 +151,30 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   return (
     <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+const defaultAuthContextValue: AuthContextType = {
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+  login: async () => {},
+  register: async () => {},
+  logout: () => {},
+  refreshUser: async () => {},
+}
+
+export const MockAuthProvider = ({
+  children,
+  value,
+}: {
+  children: React.ReactNode
+  value?: Partial<AuthContextType>
+}) => {
+  return (
+    <AuthContext.Provider value={{ ...defaultAuthContextValue, ...value }}>
       {children}
     </AuthContext.Provider>
   )

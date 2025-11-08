@@ -1,7 +1,11 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { WebSocketManager, WebSocketMessage, WebSocketContextType } from '../lib/websocket';
-
-const WebSocketContext = createContext<WebSocketContextType | null>(null);
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  WebSocketManager,
+  WebSocketMessage,
+  WebSocketContextType,
+  WebSocketContext,
+  useWebSocket as useSharedWebSocket,
+} from '../lib/websocket';
 
 interface WebSocketProviderProps {
   children: React.ReactNode;
@@ -16,7 +20,6 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const managerRef = useRef<WebSocketManager | null>(null);
-  const subscribersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
 
   useEffect(() => {
     // Get auth token from localStorage or context
@@ -25,9 +28,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     // Initialize WebSocket manager
     managerRef.current = new WebSocketManager(url, token);
     
-    managerRef.current.setConnectionChangeHandler(setIsConnected);
+    managerRef.current.setConnectionChangeHandler((connected) => {
+      setIsConnected(connected);
+      setSocket(managerRef.current?.getSocket() ?? null);
+    });
     managerRef.current.setMessageHandler(setLastMessage);
-    
+    setSocket(managerRef.current.getSocket() ?? null);
+
     // Connect
     managerRef.current.connect();
 
@@ -60,13 +67,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   );
 };
 
-export const useWebSocket = () => {
-  const context = useContext(WebSocketContext);
-  if (!context) {
-    throw new Error('useWebSocket must be used within WebSocketProvider');
-  }
-  return context;
-};
+export const useWebSocket = useSharedWebSocket;
 
 // Custom hooks for specific features
 export const useHeatMapUpdates = (callback: (event: any) => void) => {

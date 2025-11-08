@@ -96,6 +96,7 @@ export default function Profile() {
       initial="hidden"
       animate="visible"
     >
+      <h1 className="sr-only">Profile</h1>
       {/* Profile Header */}
       <motion.div 
         className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sage-100 via-earth-100 to-sage-200 dark:from-sage-800 dark:via-earth-800 dark:to-sage-700 p-8"

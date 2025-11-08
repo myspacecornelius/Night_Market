@@ -130,7 +130,7 @@ export default function Heatmap() {
       >
         <div>
           <h1 className="font-grotesk text-3xl font-bold tracking-tight">
-            Heat Map
+            Heatmap
           </h1>
           <p className="text-muted-foreground mt-1">
             Live sneaker activity in your area

@@ -1,16 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import AppShell from '../layouts/AppShell';
-import { MemoryRouter } from 'react-router-dom';
+import { renderWithProviders } from './test-utils';
 
 describe('AppShell', () => {
   it('renders dashboard', () => {
-    render(
-      <MemoryRouter>
-        <AppShell>
-          <div>Dashboard</div>
-        </AppShell>
-      </MemoryRouter>
+    renderWithProviders(
+      <AppShell>
+        <div>Dashboard</div>
+      </AppShell>
     );
     expect(true).toBe(true);
   });

@@ -1,15 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
 import LoginPage from '../pages/LoginPage';
+import { renderWithProviders } from './test-utils';
 
 describe('LoginPage', () => {
   it('renders login page', () => {
-    render(
-      <MemoryRouter>
-        <LoginPage />
-      </MemoryRouter>
-    );
+    renderWithProviders(<LoginPage />, { auth: { isAuthenticated: false, user: null } });
     const headline = screen.getByRole('heading', { name: /Login/i });
     expect(headline).toBeInTheDocument();
   });

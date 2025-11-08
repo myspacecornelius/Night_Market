@@ -158,4 +158,8 @@ export class WebSocketManager {
   getConnectionStatus() {
     return this.isConnected;
   }
+
+  getSocket() {
+    return this.ws;
+  }
 }
