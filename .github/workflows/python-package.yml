@@ -65,6 +65,7 @@ jobs:
         REDIS_URL: redis://localhost:6379/0
         SECRET_KEY: test_secret_key_for_ci
         ENVIRONMENT: test
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest -q --cov --cov-report=xml
     
