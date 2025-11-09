@@ -113,6 +113,35 @@ class ApiClient {
   }
 
   // Post methods
+  async createPost(data: CreatePostData): Promise<Post> {
+    const response = await this.client.post<Post>('/posts/', data);
+    return response.data;
+  }
+
+  async getUserFeed(skip: number = 0, limit: number = 20): Promise<Post[]> {
+    const response = await this.client.get<Post[]>('/posts/feed', {
+      params: { skip, limit },
+    });
+    return response.data;
+  }
+
+  async getGlobalFeed(skip: number = 0, limit: number = 10): Promise<Post[]> {
+    const response = await this.client.get<Post[]>('/posts/global', {
+      params: { skip, limit },
+    });
+    return response.data;
+  }
+
+  async getUserPosts(userId: string): Promise<Post[]> {
+    const response = await this.client.get<Post[]>(`/posts/user/${userId}`);
+    return response.data;
+  }
+
+  async deletePost(postId: string): Promise<void> {
+    await this.client.delete(`/posts/${postId}`);
+  }
+
+  // Signal methods (hyperlocal)
   async createHyperlocalSignal(data: CreatePostData): Promise<Post> {
     const response = await this.client.post<Post>('/v1/signals', data);
     return response.data;

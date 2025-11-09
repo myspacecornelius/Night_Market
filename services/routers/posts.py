@@ -20,6 +20,43 @@ def create_post(post: PostCreate, db: Session = Depends(get_db), current_user: U
     db.refresh(db_post)
     return db_post
 
+@router.get("/feed", response_model=List[PostSchema])
+def get_user_feed(skip: int = 0, limit: int = 20, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Get personalized feed for authenticated user.
+    For now, returns global feed sorted by boost_score and recency.
+    TODO: Implement social graph filtering when following/followers are added.
+    """
+    cache_key = f"user_feed:{current_user.user_id}:{skip}:{limit}"
+    cached_posts = r.get(cache_key)
+    if cached_posts:
+        return json.loads(cached_posts)
+
+    # Get posts sorted by boost_score (engagement) and recency
+    posts = (
+        db.query(Post)
+        .filter(Post.visibility.in_(['public', 'pseudonymous']))  # Respect privacy
+        .order_by(Post.boost_score.desc(), Post.timestamp.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    posts_dict = [{
+        "post_id": str(p.post_id),
+        "user_id": str(p.user_id),
+        "post_type": p.post_type,
+        "content_text": p.content_text,
+        "media_url": p.media_url,
+        "tags": p.tags,
+        "timestamp": p.timestamp.isoformat(),
+        "visibility": p.visibility,
+        "location_id": str(p.location_id) if p.location_id else None,
+        "boost_score": p.boost_score,
+    } for p in posts]
+    r.set(cache_key, json.dumps(posts_dict), ex=60)  # Cache for 60 seconds
+    return posts
+
 @router.get("/global", response_model=List[PostSchema])
 def get_global_feed(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     cached_posts = r.get(f"global_feed:{skip}:{limit}")

@@ -15,8 +15,8 @@ RUN npm install \
 # Bundle app source
 COPY . .
 
-# Make port 5173 available to the world outside this container
-EXPOSE 5173
+# Make port 5177 available to the world outside this container
+EXPOSE 5177
 
 # Run the app when the container launches
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5177"]
