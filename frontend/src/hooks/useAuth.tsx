@@ -140,10 +140,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await refetchUser()
   }
 
+  const isUserLoading = isAuthenticated && userLoading
+
   const value: AuthContextType = {
     user: user || null,
     isAuthenticated,
-    isLoading: userLoading || loginMutation.isPending || registerMutation.isPending,
+    isLoading: isUserLoading || loginMutation.isPending || registerMutation.isPending,
     login,
     register,
     logout,
