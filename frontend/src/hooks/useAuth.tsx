@@ -2,7 +2,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { apiClient, User } from '@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
+import type { User } from '@/lib/api-client'
 import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
 
 export interface AuthContextType {

@@ -94,13 +94,21 @@ export const changePasswordSchema = z.object({
   path: ['newPassword']
 })
 
+// Infer types from schemas
+type LoginFormDataType = z.infer<typeof loginSchema>
+type RegisterFormDataType = z.infer<typeof registerSchema>
+type ForgotPasswordFormDataType = z.infer<typeof forgotPasswordSchema>
+type ResetPasswordFormDataType = z.infer<typeof resetPasswordSchema>
+type ProfileUpdateFormDataType = z.infer<typeof profileUpdateSchema>
+type ChangePasswordFormDataType = z.infer<typeof changePasswordSchema>
+
 // Export types
-export type LoginFormData = z.infer<typeof loginSchema>
-export type RegisterFormData = z.infer<typeof registerSchema>
-export type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>
-export type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>
-export type ProfileUpdateFormData = z.infer<typeof profileUpdateSchema>
-export type ChangePasswordFormData = z.infer<typeof changePasswordSchema>
+export type LoginFormData = LoginFormDataType
+export type RegisterFormData = RegisterFormDataType
+export type ForgotPasswordFormData = ForgotPasswordFormDataType
+export type ResetPasswordFormData = ResetPasswordFormDataType
+export type ProfileUpdateFormData = ProfileUpdateFormDataType
+export type ChangePasswordFormData = ChangePasswordFormDataType
 
 // Password strength checker
 export const getPasswordStrength = (password: string) => {
