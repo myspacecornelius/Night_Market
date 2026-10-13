@@ -29,7 +29,7 @@ export const Sidebar = () => {
     >
       <Stack className="p-4">
         <h1 className={cn('text-2xl font-bold', !isSidebarOpen && 'text-center')}>
-          {isSidebarOpen ? 'Dharma' : 'D'}
+          {isSidebarOpen ? 'Night Market' : 'D'}
         </h1>
       </Stack>
       <nav className="mt-4">

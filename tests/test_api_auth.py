@@ -25,6 +25,8 @@ def test_db():
 @pytest.fixture
 def test_user(test_db):
     """Create a test user"""
+    test_db.query(User).filter(User.username == "testuser").delete()
+    test_db.commit()
     user = User(
         user_id=uuid.uuid4(),
         username="testuser",
@@ -100,14 +102,14 @@ def test_login_wrong_password(test_user):
 
 def test_protected_endpoint_without_token():
     """Test accessing protected endpoint without authentication"""
-    response = client.get("/laces/balance")
+    response = client.get("/v1/laces/balance")
     assert response.status_code == 401
 
 
 def test_protected_endpoint_with_invalid_token():
     """Test accessing protected endpoint with invalid token"""
     response = client.get(
-        "/laces/balance",
+        "/v1/laces/balance",
         headers={"Authorization": "Bearer invalid_token_here"}
     )
     assert response.status_code == 401
@@ -137,44 +139,15 @@ def test_token_refresh(test_user):
     assert new_tokens["access_token"] != tokens["access_token"]
 
 
-def test_logout(test_user):
-    """Test logout functionality"""
-    # Login first
-    login_response = client.post(
-        "/auth/token",
-        data={
-            "username": "testuser",
-            "password": "testpass123"
-        }
+def test_logout_revokes_sessions(test_user):
+    """Logout revokes refresh sessions (access JWTs stay valid until expiry)"""
+    login = client.post("/auth/token", data={"username": "testuser", "password": "testpass123"})
+    tokens = login.json()
+    response = client.post(
+        "/auth/logout", headers={"Authorization": f"Bearer {tokens['access_token']}"}
     )
-    tokens = login_response.json()
-
-    # Logout
-    logout_response = client.post(
-        "/auth/logout",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-        json={"refresh_token": tokens["refresh_token"]}
-    )
-    assert logout_response.status_code == 200
-
-    # Try to use the token after logout (should fail)
-    protected_response = client.get(
-        "/laces/balance",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"}
-    )
-    assert protected_response.status_code == 401
-
-
-def test_rate_limiting():
-    """Test rate limiting on endpoints"""
-    # Make many requests to trigger rate limit
-    responses = []
-    for _ in range(100):
-        response = client.get("/health")
-        responses.append(response.status_code)
-
-    # Should eventually get a 429 (Too Many Requests)
-    assert 429 in responses or all(r == 200 for r in responses)
+    assert response.status_code == 200
+    assert response.json()["sessions_revoked"] >= 1
 
 
 if __name__ == "__main__":

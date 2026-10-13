@@ -117,7 +117,7 @@ const CardFooter = React.forwardRef<
 ))
 CardFooter.displayName = "CardFooter"
 
-// Specialized card components for Dharma
+// Specialized card components for Night Market
 const HeatCard = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, ...props }, ref) => (
     <Card

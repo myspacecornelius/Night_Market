@@ -90,7 +90,7 @@ export function AppShell() {
               to="/" 
               className="text-2xl font-bold text-gradient-earth magnetic"
             >
-              Dharma
+              Night Market
             </NavLink>
           </motion.div>
           
@@ -219,14 +219,14 @@ export function AppShell() {
                 <Flame className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h3 className="font-bold text-earth-700 dark:text-earth-300">Dharma</h3>
+                <h3 className="font-bold text-earth-700 dark:text-earth-300">Night Market</h3>
                 <p className="text-sm text-muted-foreground">The Underground Network</p>
               </div>
             </div>
             
             <div className="text-center md:text-right">
               <p className="text-sm text-muted-foreground">
-                © {new Date().getFullYear()} Dharma. Built with sophisticated taste.
+                © {new Date().getFullYear()} Night Market. Built with sophisticated taste.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 Connecting sneaker culture through hyperlocal intelligence

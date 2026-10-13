@@ -27,6 +27,8 @@ def test_db():
 @pytest.fixture
 def test_user(test_db):
     """Create a test user with LACES balance"""
+    test_db.query(User).filter(User.username == "lacesuser").delete()
+    test_db.commit()
     user = User(
         user_id=uuid.uuid4(),
         username="lacesuser",
@@ -56,7 +58,7 @@ def auth_token(test_user):
 def test_get_laces_balance_authenticated(auth_token, test_user):
     """Test getting LACES balance with authentication"""
     response = client.get(
-        "/laces/balance",
+        "/v1/laces/balance",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 200
@@ -68,14 +70,14 @@ def test_get_laces_balance_authenticated(auth_token, test_user):
 
 def test_get_laces_balance_unauthenticated():
     """Test getting LACES balance without authentication"""
-    response = client.get("/laces/balance")
+    response = client.get("/v1/laces/balance")
     assert response.status_code == 401
 
 
 def test_get_laces_ledger(auth_token):
     """Test getting LACES transaction history"""
     response = client.get(
-        "/laces/ledger",
+        "/v1/laces/ledger",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 200
@@ -90,7 +92,7 @@ def test_get_laces_ledger(auth_token):
 def test_claim_daily_stipend(auth_token):
     """Test claiming daily LACES stipend"""
     response = client.post(
-        "/laces/daily-stipend",
+        "/v1/laces/daily-stipend",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     # Could be 200 (success) or 400 (already claimed)
@@ -107,13 +109,13 @@ def test_claim_daily_stipend_twice(auth_token):
     """Test that daily stipend can only be claimed once per day"""
     # First claim
     first_response = client.post(
-        "/laces/daily-stipend",
+        "/v1/laces/daily-stipend",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
 
     # Second claim (should fail)
     second_response = client.post(
-        "/laces/daily-stipend",
+        "/v1/laces/daily-stipend",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
 
@@ -124,7 +126,7 @@ def test_claim_daily_stipend_twice(auth_token):
 def test_get_earning_opportunities(auth_token):
     """Test getting earning opportunities"""
     response = client.get(
-        "/laces/opportunities",
+        "/v1/laces/opportunities",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 200
@@ -162,7 +164,7 @@ def test_boost_post_insufficient_balance(auth_token, test_db, test_user):
 
     # Try to boost with insufficient funds
     response = client.post(
-        f"/laces/boost-post/{post.post_id}?boost_amount=10",
+        f"/v1/laces/boost-post/{post.post_id}?boost_amount=10",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 400
@@ -184,7 +186,7 @@ def test_boost_own_post(auth_token, test_db, test_user):
 
     # Try to boost own post
     response = client.post(
-        f"/laces/boost-post/{post.post_id}?boost_amount=10",
+        f"/v1/laces/boost-post/{post.post_id}?boost_amount=10",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 400
@@ -195,7 +197,7 @@ def test_boost_nonexistent_post(auth_token):
     """Test boosting a post that doesn't exist"""
     fake_post_id = uuid.uuid4()
     response = client.post(
-        f"/laces/boost-post/{fake_post_id}?boost_amount=10",
+        f"/v1/laces/boost-post/{fake_post_id}?boost_amount=10",
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 404
@@ -204,7 +206,7 @@ def test_boost_nonexistent_post(auth_token):
 def test_grant_laces_requires_admin(auth_token):
     """Test that granting LACES requires admin privileges"""
     response = client.post(
-        "/laces/grant",
+        "/v1/laces/grant",
         headers={"Authorization": f"Bearer {auth_token}"},
         json={
             "user_id": str(uuid.uuid4()),

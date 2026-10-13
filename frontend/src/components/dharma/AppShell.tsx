@@ -79,7 +79,7 @@ export function DharmaAppShell() {
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-heat to-heat/80 flex items-center justify-center">
                 <Flame size={18} className="text-white" />
               </div>
-              <span className="font-grotesk font-bold text-xl">Dharma</span>
+              <span className="font-grotesk font-bold text-xl">Night Market</span>
             </motion.div>
           </div>
 

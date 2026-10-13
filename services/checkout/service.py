@@ -371,7 +371,7 @@ class CheckoutService:
             # Store result in database for historical records
             await self._store_checkout_result(task, result)
 
-            # Publish result to Dharma backend
+            # Publish result to Night Market backend
             await self._publish_checkout_result(task, result)
             
             # Update final status
@@ -495,7 +495,7 @@ class CheckoutService:
         logger.info(f"Storing checkout result for task {task.task_id} in database.")
 
     async def _publish_checkout_result(self, task: CheckoutTask, result: CheckoutResult):
-        """Publish the result of a checkout attempt to Redis for the Dharma backend."""
+        """Publish the result of a checkout attempt to Redis for the Night Market backend."""
         result_data = {
             "task_id": task.task_id,
             "user_id": task.user_id,
