@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Image as ImageIcon, MapPin } from "lucide-react";
 import React, { useState, useRef } from "react";
-import { Badge } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/badge";
 
 // TODO(api): This should be passed from a user session or context
 const MOCK_USER_LOCATION = "Brooklyn, NY (2 mi away)";

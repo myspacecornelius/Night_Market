@@ -19,7 +19,7 @@ import {
 } from '@/components/dashboard'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Badge } from '@/components/ui/badge'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
