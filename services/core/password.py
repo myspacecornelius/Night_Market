@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+import secrets
+import string
 from typing import Tuple
-
-from passlib.pwd import genword
 
 
 class PasswordPolicy:
@@ -27,5 +27,9 @@ class PasswordPolicy:
     @staticmethod
     def generate() -> str:
         """Return a cryptographically strong password suggestion."""
-        return genword(entropy=56, charset="ascii_62")
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        while True:
+            candidate = "".join(secrets.choice(alphabet) for _ in range(16))
+            if PasswordPolicy.validate(candidate)[0]:
+                return candidate
 

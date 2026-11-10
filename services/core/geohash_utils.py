@@ -31,7 +31,8 @@ class GeohashUtils:
     @staticmethod
     def decode(geohash: str) -> Tuple[float, float]:
         """Decode geohash to coordinates (lat, lng)"""
-        return geohash2.decode(geohash)
+        lat, lng, _, _ = geohash2.decode_exactly(geohash)
+        return lat, lng
     
     @staticmethod
     def get_precision_for_zoom(zoom_level: int) -> int:
@@ -64,8 +65,7 @@ class GeohashUtils:
     @staticmethod
     def get_bounding_box(geohash: str) -> Dict[str, float]:
         """Get bounding box for geohash"""
-        lat, lng = geohash2.decode(geohash)
-        lat_err, lng_err = geohash2.decode_exact(geohash)[2:]
+        lat, lng, lat_err, lng_err = geohash2.decode_exactly(geohash)
         
         return {
             'min_lat': lat - lat_err,
@@ -77,7 +77,7 @@ class GeohashUtils:
     @staticmethod
     def is_within_bbox(geohash: str, bbox: List[float]) -> bool:
         """Check if geohash center is within bounding box [min_lng, min_lat, max_lng, max_lat]"""
-        lat, lng = geohash2.decode(geohash)
+        lat, lng, _, _ = geohash2.decode_exactly(geohash)
         min_lng, min_lat, max_lng, max_lat = bbox
         
         return min_lat <= lat <= max_lat and min_lng <= lng <= max_lng

@@ -38,7 +38,8 @@ def encode_geohash(lat: float, lon: float, precision: int = 6) -> str:
 
 def decode_geohash(gh: str) -> Tuple[float, float]:
     """Decode geohash to (latitude, longitude)"""
-    return geohash.decode(gh)
+    lat, lon, _, _ = geohash.decode_exactly(gh)
+    return lat, lon
 
 
 def get_geohash_neighbors(gh: str) -> list[str]:

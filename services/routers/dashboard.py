@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta
 import json
 import random
+from math import cos, pi
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 

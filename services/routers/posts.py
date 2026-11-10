@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.post("/", response_model=PostSchema)
 def create_post(post: PostCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_post = Post(**post.dict(), user_id=current_user.user_id)
+    db_post = Post(**post.model_dump(exclude={"geo_tag_lat", "geo_tag_long"}), user_id=current_user.user_id)
     db.add(db_post)
     db.commit()
     db.refresh(db_post)
@@ -35,7 +35,7 @@ def get_user_feed(skip: int = 0, limit: int = 20, db: Session = Depends(get_db),
     # Get posts sorted by boost_score (engagement) and recency
     posts = (
         db.query(Post)
-        .filter(Post.visibility.in_(['public', 'pseudonymous']))  # Respect privacy
+        .filter(Post.visibility == 'public')  # Respect privacy
         .order_by(Post.boost_score.desc(), Post.timestamp.desc())
         .offset(skip)
         .limit(limit)

@@ -5,7 +5,8 @@ import geohash2
 import redis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func
+from geoalchemy2 import Geometry
+from sqlalchemy import cast, func
 from sqlalchemy.orm import Session
 
 from services.core.cache import CacheStrategy
@@ -78,8 +79,8 @@ async def get_heatmap(
         query = (
             db.query(
                 Post,
-                func.ST_Y(Location.point).label("lat"),
-                func.ST_X(Location.point).label("lng"),
+                func.ST_Y(cast(Location.point, Geometry)).label("lat"),
+                func.ST_X(cast(Location.point, Geometry)).label("lng"),
             )
             .join(Location)
             .filter(Post.timestamp >= window_start)
@@ -97,7 +98,7 @@ async def get_heatmap(
             post_geohash = geohash2.encode(lat, lng, precision=zoom)
 
             if post_geohash not in geohash_bins:
-                geohash_center = geohash2.decode(post_geohash)
+                geohash_center = geohash2.decode_exactly(post_geohash)
                 geohash_bins[post_geohash] = {
                     "geohash": post_geohash,
                     "lat": geohash_center[0],
