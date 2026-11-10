@@ -95,7 +95,7 @@ migrate:
 # Seed demo data
 seed:
 	@echo "🌱 Seeding demo data..."
-	@docker compose exec api python -m backend.seed
+	@docker compose exec api python -m services.seed
 	@echo "✅ Demo data populated"
 
 # Run tests
@@ -103,11 +103,12 @@ test:
 	@echo "🧪 Running Dharma test suite..."
 	@if [ -f frontend/package.json ]; then \
 		echo "Testing frontend..."; \
-		cd frontend && npm test; \
+		(cd frontend && npm test -- --run); \
 	fi
-	@if [ -f backend/requirements.txt ]; then \
+	@if [ -f requirements.txt ]; then \
 		echo "Testing backend..."; \
-		docker compose exec api python -m pytest tests/ -v; \
+		docker compose exec postgres sh -c 'createdb -U "$$POSTGRES_USER" dharma_test 2>/dev/null || true'; \
+		docker compose exec -w /app api sh -c 'TEST_DATABASE_URL="postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/dharma_test" python -m pytest -v'; \
 	fi
 
 # Clean up containers and volumes

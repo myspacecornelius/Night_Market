@@ -18,15 +18,7 @@ VITE_WS_URL=${VITE_WS_URL}
 VITE_ENV=${VITE_ENV}
 EOF
 
-# Create the backend .env file
-cat << EOF > .env
-POSTGRES_USER=${POSTGRES_USER}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=${POSTGRES_DB}
-DATABASE_URL=${DATABASE_URL}
-REDIS_URL=${REDIS_URL}
-ENVIRONMENT=${ENVIRONMENT}
-GEMINI_API_KEY=${GEMINI_API_KEY}
-EOF
+# The root .env is left as-is: rewriting it here dropped JWT_SECRET_KEY and the
+# *_HOST/*_PORT values that DATABASE_URL and REDIS_URL are built from.
 
-echo ".env files for frontend and backend have been created successfully."
+echo "frontend/.env has been created successfully."
