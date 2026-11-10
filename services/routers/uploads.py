@@ -3,6 +3,7 @@ import boto3
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException
 from services import schemas
+from services.core.auth import get_current_active_user
 from services.core.s3 import s3_client
 
 router = APIRouter(
@@ -10,7 +11,7 @@ router = APIRouter(
     tags=["uploads"],
 )
 
-@router.post("/presign", response_model=schemas.PresignedUrl)
+@router.post("/presign", response_model=schemas.PresignedUrl, dependencies=[Depends(get_current_active_user)])
 def create_presigned_url(file_name: str, file_type: str):
     # TODO: Add validation for file_name and file_type
     # TODO: Get bucket name from config

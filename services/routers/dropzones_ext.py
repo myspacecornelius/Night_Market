@@ -4,14 +4,24 @@ from sqlalchemy import func, text, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel, UUID4
-import uuid
+from collections import namedtuple
+from geoalchemy2.shape import to_shape
 import math
 
 from services.database import get_db
+from services.core.auth import get_current_active_user
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, DropZoneStatus, MemberRole
 from services.models.user import User
 
 router = APIRouter()
+
+Coords = namedtuple("Coords", ["lat", "lng"])
+
+
+def point_coords(point) -> Coords:
+    """Latitude/longitude of a PostGIS point column value."""
+    shape = to_shape(point)
+    return Coords(lat=shape.y, lng=shape.x)
 
 # Pydantic models for API
 class DropZoneCreate(BaseModel):
@@ -68,12 +78,11 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
 @router.post("/v1/dropzones", response_model=DropZoneResponse)
 async def create_dropzone(
     dropzone_data: DropZoneCreate,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication to get current_user
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Create a new dropzone"""
-    # For now, use a placeholder user ID - in production this would come from auth
-    owner_id = uuid.uuid4()  # TODO: Replace with current_user.user_id
+    owner_id = current_user.user_id
     
     # Create PostGIS point for center
     center_point_wkt = f"POINT({dropzone_data.center_lng} {dropzone_data.center_lat})"
@@ -109,10 +118,7 @@ async def create_dropzone(
     db.commit()
     
     # Get coordinates back from PostGIS for response
-    coords_result = db.execute(
-        text("SELECT ST_X(:point) as lng, ST_Y(:point) as lat"),
-        {"point": dropzone.center_point}
-    ).fetchone()
+    coords_result = point_coords(dropzone.center_point)
     
     return DropZoneResponse(
         id=dropzone.id,
@@ -177,10 +183,7 @@ async def list_dropzones(
     results = []
     for dropzone in dropzones:
         # Get coordinates from PostGIS
-        coords_result = db.execute(
-            text("SELECT ST_X(:point) as lng, ST_Y(:point) as lat"),
-            {"point": dropzone.center_point}
-        ).fetchone()
+        coords_result = point_coords(dropzone.center_point)
         
         # Count members and check-ins
         member_count = db.query(func.count(DropZoneMember.id)).filter(
@@ -213,8 +216,8 @@ async def list_dropzones(
 async def check_in_to_dropzone(
     dropzone_id: UUID4,
     check_in_data: CheckInRequest,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication to get current_user
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Check in to a dropzone with location verification"""
     # Get dropzone
@@ -234,10 +237,7 @@ async def check_in_to_dropzone(
         raise HTTPException(status_code=400, detail="Dropzone has ended")
     
     # Get dropzone center coordinates
-    coords_result = db.execute(
-        text("SELECT ST_X(:point) as lng, ST_Y(:point) as lat"),
-        {"point": dropzone.center_point}
-    ).fetchone()
+    coords_result = point_coords(dropzone.center_point)
     
     center_lat, center_lng = coords_result.lat, coords_result.lng
     
@@ -254,8 +254,7 @@ async def check_in_to_dropzone(
             detail=f"Too far from dropzone. Distance: {distance:.1f}m, Required: {dropzone.check_in_radius}m"
         )
     
-    # TODO: Get current user from authentication
-    user_id = uuid.uuid4()  # Placeholder
+    user_id = current_user.user_id
     
     # Check if user already checked in today
     today = datetime.now().date()
@@ -331,10 +330,7 @@ async def get_dropzone_details(
         raise HTTPException(status_code=404, detail="Dropzone not found")
     
     # Get coordinates from PostGIS
-    coords_result = db.execute(
-        text("SELECT ST_X(:point) as lng, ST_Y(:point) as lat"),
-        {"point": dropzone.center_point}
-    ).fetchone()
+    coords_result = point_coords(dropzone.center_point)
     
     # Get stats
     member_count = db.query(func.count(DropZoneMember.id)).filter(
@@ -393,11 +389,11 @@ async def get_dropzone_details(
 @router.post("/v1/dropzones/{dropzone_id}/join")
 async def join_dropzone(
     dropzone_id: UUID4,
-    db: Session = Depends(get_db)
-    # TODO: Add authentication
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Join a dropzone as a member"""
-    user_id = uuid.uuid4()  # TODO: Get from auth
+    user_id = current_user.user_id
     
     # Check if already a member
     existing_member = db.query(DropZoneMember).filter(

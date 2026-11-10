@@ -1,7 +1,8 @@
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
+from services.core.auth import get_current_active_user
 from services.core.database import get_db
 from services.core.password import PasswordPolicy
 from services.core.security import get_password_hash
@@ -27,7 +28,11 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
-@router.get("/", response_model=List[UserSchema])
-def get_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+@router.get("/", response_model=List[UserSchema], dependencies=[Depends(get_current_active_user)])
+def get_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
     users = db.query(User).offset(skip).limit(limit).all()
     return users
