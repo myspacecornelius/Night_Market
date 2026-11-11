@@ -151,3 +151,42 @@ def test_registration_validates_the_username(client):
     assert register("").status_code == 422
     assert register("a b").status_code == 422
     assert register("x" * 51).status_code == 422
+
+
+def test_readiness_reports_dependencies(client, monkeypatch):
+    ready = client.get("/health/ready")
+    assert ready.status_code == 200
+    assert ready.json()["checks"] == {"database": True, "redis": True}
+
+    from services import main
+
+    monkeypatch.setattr(main, "db_healthcheck", lambda: False)
+    degraded = client.get("/health/ready")
+    assert degraded.status_code == 503
+    assert degraded.json()["checks"]["database"] is False
+
+
+def test_unexpected_constraint_and_type_errors_are_not_500s(client, db_session):
+    from fastapi import APIRouter
+    from sqlalchemy import text
+
+    from services.main import app
+
+    probe = APIRouter()
+
+    @probe.get("/_probe/integrity")
+    def integrity():
+        db_session.execute(text("INSERT INTO users (user_id) VALUES (gen_random_uuid())"))
+
+    @probe.get("/_probe/data")
+    def data():
+        db_session.execute(text("SELECT 'not-a-uuid'::uuid"))
+
+    app.include_router(probe)
+    try:
+        assert client.get("/_probe/integrity").status_code == 409
+        db_session.rollback()
+        assert client.get("/_probe/data").status_code == 422
+        db_session.rollback()
+    finally:
+        app.router.routes[:] = [route for route in app.router.routes if not getattr(route, "path", "").startswith("/_probe/")]

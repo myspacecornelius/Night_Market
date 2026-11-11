@@ -1,19 +1,23 @@
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+from sqlalchemy.exc import DataError, IntegrityError
 
 try:
     # When running as a package
     from .routers import router as api_router
     from .routers import hyperlocal, shop
     from .core.redis_client import get_redis
+    from .database import db_healthcheck
     from .middleware.rate_limit import RateLimitMiddleware
     from .middleware.tracing import TracingMiddleware
     from .middleware.security_headers import SecurityHeadersMiddleware
@@ -22,6 +26,7 @@ except ImportError:
     from routers import router as api_router
     from routers import hyperlocal, shop
     from core.redis_client import get_redis
+    from services.database import db_healthcheck
     from middleware.rate_limit import RateLimitMiddleware
     from middleware.tracing import TracingMiddleware
     from middleware.security_headers import SecurityHeadersMiddleware
@@ -45,14 +50,65 @@ if SENTRY_DSN:
     )
     logger.info("🛰️ Sentry enabled")
 
+async def _warm_critical_caches():
+    """Fire-and-forget warming for top endpoints."""
+    try:
+        from worker.tasks import refresh_heatmap_cache  # lazy import to avoid Celery unless needed
+
+        logger.info("🔥 Scheduling heatmap warmup for major metros")
+        for city in ["boston", "nyc", "la", "chicago"]:
+            refresh_heatmap_cache.delay(zones=[city])
+    except Exception as exc:
+        logger.warning("Unable to warm caches on startup: %s", exc)
+
+
+def _redis_healthcheck() -> bool:
+    try:
+        return bool(get_redis().ping())
+    except Exception:
+        return False
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown: report what is actually reachable, then warm caches."""
+    logger.info("🔥 Dharma API starting up...")
+    logger.info("🌍 Environment: %s", os.getenv("ENVIRONMENT", "development"))
+    logger.info("🗄️ Database: %s", "connected" if db_healthcheck() else "NOT REACHABLE")
+    logger.info("⚡ Redis: %s", "connected" if _redis_healthcheck() else "NOT REACHABLE")
+
+    warmup = asyncio.create_task(_warm_critical_caches())
+
+    logger.info("✅ Dharma API ready - the underground network is live!")
+    yield
+    warmup.cancel()
+    logger.info("🛑 Dharma API shutdown complete")
+
+
 # Create FastAPI app with enhanced metadata
 app = FastAPI(
     title="Dharma API",
     description="The Underground Network for Sneaker Culture",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
+
+
+# Safety net: a constraint or type error that a route did not anticipate is the
+# client's problem (conflict / bad value), not a 500. Routes should still
+# validate their own input; this only catches what slips through.
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    logger.warning("Integrity error on %s %s: %s", request.method, request.url.path, exc.orig)
+    return JSONResponse(status_code=409, content={"detail": "The request conflicts with existing data"})
+
+
+@app.exception_handler(DataError)
+async def data_error_handler(request: Request, exc: DataError):
+    logger.warning("Data error on %s %s: %s", request.method, request.url.path, exc.orig)
+    return JSONResponse(status_code=422, content={"detail": "A value in the request is not valid"})
 
 # Add prometheus asgi middleware to route /metrics requests
 metrics_app = make_asgi_app()
@@ -81,39 +137,6 @@ except Exception as e:
     logger.warning(f"⚠️ Rate limiting disabled: {e}")
     logger.info("🔧 Continuing without rate limiting in development mode")
 
-async def _warm_critical_caches():
-    """Fire-and-forget warming for top endpoints."""
-    try:
-        from worker.tasks import refresh_heatmap_cache  # lazy import to avoid Celery unless needed
-
-        logger.info("🔥 Scheduling heatmap warmup for major metros")
-        for city in ["boston", "nyc", "la", "chicago"]:
-            refresh_heatmap_cache.delay(zones=[city])
-    except Exception as exc:
-        logger.warning("Unable to warm caches on startup: %s", exc)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """🚀 Dharma API startup - the underground network is coming online"""
-    logger.info("🔥 Dharma API starting up...")
-    logger.info("🌍 Environment: %s", os.getenv("ENVIRONMENT", "development"))
-    logger.info("🗄️ Database: Connected")
-    logger.info("⚡ Redis: Connected")
-    logger.info("🪙 LACES economy: Active")
-    logger.info("📍 Hyperlocal signals: Online")
-
-    asyncio.create_task(_warm_critical_caches())
-
-    logger.info("✅ Dharma API ready - the underground network is live!")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """🛑 Dharma API shutdown"""
-    logger.info("🛑 Dharma API shutting down...")
-    logger.info("💾 Saving community state...")
-    logger.info("✅ Dharma API shutdown complete")
-
 # Enhanced health check endpoint
 @app.get("/health")
 def health_check():
@@ -131,6 +154,14 @@ def health_check():
             "drop_zones": True
         }
     }
+
+@app.get("/health/ready")
+def readiness_check():
+    """Readiness: 200 only when the database and Redis are reachable."""
+    checks = {"database": db_healthcheck(), "redis": _redis_healthcheck()}
+    ready = all(checks.values())
+    return JSONResponse(status_code=200 if ready else 503, content={"status": "ready" if ready else "degraded", "checks": checks})
+
 
 # Root endpoint with welcome message
 @app.get("/")
