@@ -79,7 +79,7 @@ def client(db_session):
     # Start every test without cached responses or rate-limit counters from earlier
     # runs: cached feeds and heatmaps would describe rows that were rolled back.
     # Only this application's own key prefixes are touched.
-    for pattern in ("rate_limit:ip:testclient:*", "heatmap:*", "global_feed:*", "user_feed:*", "feed_version"):
+    for pattern in ("rate_limit:ip:testclient:*", "heatmap:*", "heatmap_refresh:*", "global_feed:*", "user_feed:*", "feed_version"):
         for key in redis_client.scan_iter(pattern):
             redis_client.delete(key)
 

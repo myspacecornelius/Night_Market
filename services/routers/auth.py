@@ -8,8 +8,8 @@ from services.database import get_db
 from services.core.security import DUMMY_PASSWORD_HASH, verify_password
 from services.core.auth import (
     get_current_active_user,
+    claim_refresh_session,
     issue_tokens,
-    validate_refresh_token,
     revoke_user_sessions
 )
 from services.routers.users import register_user
@@ -32,7 +32,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return register_user(user, db)
 
 @router.post("/token", response_model=schemas.TokenPair)
-async def login_for_access_token(
+def login_for_access_token(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
@@ -61,13 +61,14 @@ async def login_for_access_token(
     return _token_response(issue_tokens(db, user, request))
 
 @router.post("/refresh", response_model=schemas.TokenPair)
-async def refresh_access_token(
+def refresh_access_token(
     request: Request,
     refresh_request: schemas.RefreshTokenRequest,
     db: Session = Depends(get_db)
 ):
     """Exchange a refresh token for a new token pair. The old pair stops working."""
-    session = validate_refresh_token(db, refresh_request.refresh_token)
+    # Claiming the token also revokes its session, so it cannot be exchanged twice
+    session = claim_refresh_session(db, refresh_request.refresh_token)
     
     if not session:
         raise HTTPException(
@@ -83,14 +84,10 @@ async def refresh_access_token(
             detail="User not found or inactive"
         )
     
-    # Rotate: revoke the old session, then start a new one
-    session.revoke("refresh")
-    db.commit()
-
     return _token_response(issue_tokens(db, user, request))
 
 @router.post("/logout")
-async def logout(
+def logout(
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -103,6 +100,6 @@ async def logout(
     }
 
 @router.get("/me", response_model=schemas.User)
-async def read_users_me(current_user: models.User = Depends(get_current_active_user)):
+def read_users_me(current_user: models.User = Depends(get_current_active_user)):
     """Get current user profile"""
     return current_user

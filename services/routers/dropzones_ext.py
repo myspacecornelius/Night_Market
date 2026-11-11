@@ -4,6 +4,7 @@ from sqlalchemy import func, text, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field, UUID4, field_validator, model_validator
+from services.schemas.post import Tag
 from collections import namedtuple
 from geoalchemy2.shape import to_shape
 import math
@@ -17,6 +18,30 @@ from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, 
 from services.models.user import User
 
 router = APIRouter()
+
+# Check-ins pay LACES and the position is whatever the client reports, so the payout
+# is bounded per user instead of per zone: creating more zones earns nothing extra.
+MAX_REWARDED_CHECKINS_PER_DAY = 3
+MAX_DROPZONES_CREATED_PER_DAY = 5
+MAX_CHECK_IN_RADIUS_METERS = 500
+
+
+def lock_user(db: Session, user_id) -> None:
+    """Serialise this user's check-ins, joins and zone creations.
+
+    The "already checked in / already a member / daily limit" checks read first and
+    write afterwards; without the row lock, simultaneous requests all passed the read.
+    The handlers that use it are plain ``def`` (they run in a worker thread), because
+    waiting for a row lock on the event loop would stall every other request.
+    """
+    db.query(User.user_id).filter(User.user_id == user_id).with_for_update().first()
+
+
+def refuse(db: Session, status_code: int, detail: str) -> HTTPException:
+    """The error to raise once row locks are held: releases them straight away."""
+    db.rollback()
+    return HTTPException(status_code=status_code, detail=detail)
+
 
 Coords = namedtuple("Coords", ["lat", "lng"])
 
@@ -60,12 +85,12 @@ class DropZoneCreate(BaseModel):
     center_lat: float = Field(ge=-90, le=90)
     center_lng: float = Field(ge=-180, le=180)
     radius_meters: float = Field(100.0, gt=0, le=50_000)
-    check_in_radius: float = Field(50.0, gt=0, le=50_000)
+    check_in_radius: float = Field(50.0, gt=0, le=MAX_CHECK_IN_RADIUS_METERS)
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     max_capacity: Optional[int] = Field(None, ge=1)
     rules: Optional[str] = Field(None, max_length=5000)
-    tags: Optional[List[str]] = Field(None, max_length=20)
+    tags: Optional[List[Tag]] = Field(None, max_length=20)
     is_public: bool = True
 
     _utc_times = field_validator('starts_at', 'ends_at')(_as_utc)
@@ -114,13 +139,21 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     return c * r
 
 @router.post("/v1/dropzones", response_model=DropZoneResponse)
-async def create_dropzone(
+def create_dropzone(
     dropzone_data: DropZoneCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new dropzone"""
     owner_id = current_user.user_id
+
+    lock_user(db, owner_id)
+    created_today = db.query(func.count(DropZone.id)).filter(
+        DropZone.owner_id == owner_id,
+        DropZone.created_at >= laces_service.start_of_utc_day(),
+    ).scalar()
+    if created_today >= MAX_DROPZONES_CREATED_PER_DAY:
+        raise refuse(db, 429, f"You can create at most {MAX_DROPZONES_CREATED_PER_DAY} dropzones per day")
     
     # Create PostGIS point for center
     center_point_wkt = f"POINT({dropzone_data.center_lng} {dropzone_data.center_lat})"
@@ -179,7 +212,7 @@ async def create_dropzone(
     )
 
 @router.get("/v1/dropzones", response_model=List[DropZoneResponse])
-async def list_dropzones(
+def list_dropzones(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
     active: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(50, ge=1, le=100),
@@ -267,7 +300,7 @@ async def list_dropzones(
     return results
 
 @router.post("/v1/dropzones/{dropzone_id}/checkin")
-async def check_in_to_dropzone(
+def check_in_to_dropzone(
     dropzone_id: UUID4,
     check_in_data: CheckInRequest,
     db: Session = Depends(get_db),
@@ -307,6 +340,7 @@ async def check_in_to_dropzone(
         )
     
     user_id = current_user.user_id
+    lock_user(db, user_id)
     
     # Check if user already checked in today (UTC day)
     today_start = laces_service.start_of_utc_day(now)
@@ -319,7 +353,7 @@ async def check_in_to_dropzone(
     ).first()
     
     if existing_checkin:
-        raise HTTPException(status_code=400, detail="Already checked in today")
+        raise refuse(db, 400, "Already checked in today")
     
     # Calculate streak count
     # Get user's last check-in at this dropzone
@@ -339,17 +373,35 @@ async def check_in_to_dropzone(
             streak_count = last_checkin.streak_count + 1
         # If there's a gap, streak resets to 1
     elif dropzone.max_capacity is not None:
-        # First visit: max_capacity limits how many different people may check in
+        # First visit: max_capacity limits how many different people may check in.
+        # The zone row is locked so two first visits cannot both take the last place.
+        db.query(DropZone.id).filter(DropZone.id == dropzone_id).with_for_update().first()
         attendees = db.query(func.count(func.distinct(DropZoneCheckIn.user_id))).filter(
             DropZoneCheckIn.dropzone_id == dropzone_id
         ).scalar()
         if attendees >= dropzone.max_capacity:
-            raise HTTPException(status_code=409, detail="Dropzone is at capacity")
+            raise refuse(db, 409, "Dropzone is at capacity")
     
     # Calculate points based on streak
     base_points = 10
     streak_bonus = min(streak_count - 1, 10) * 2  # Max 20 bonus points
     total_points = base_points + streak_bonus
+
+    # The check-in always counts; the LACES reward is limited. A zone's owner earns
+    # nothing at their own zone, and only the first few check-ins of the day pay.
+    rewarded_today = db.query(func.count(DropZoneCheckIn.id)).filter(
+        DropZoneCheckIn.user_id == user_id,
+        DropZoneCheckIn.checked_in_at >= today_start,
+        DropZoneCheckIn.points_earned > 0,
+    ).scalar()
+    if dropzone.owner_id == user_id:
+        total_points = 0
+        reward_note = "No LACES for checking in at your own dropzone."
+    elif rewarded_today >= MAX_REWARDED_CHECKINS_PER_DAY:
+        total_points = 0
+        reward_note = f"Daily limit of {MAX_REWARDED_CHECKINS_PER_DAY} rewarded check-ins reached."
+    else:
+        reward_note = f"Points: {total_points}"
     
     # Create check-in record
     check_in_location_wkt = f"POINT({check_in_data.lng} {check_in_data.lat})"
@@ -362,18 +414,23 @@ async def check_in_to_dropzone(
         message=check_in_data.message,
         photo_url=check_in_data.photo_url,
         streak_count=streak_count,
-        points_earned=total_points
+        points_earned=total_points,
+        # The same clock as the "already checked in today" check above
+        checked_in_at=now,
     )
     
     db.add(checkin)
     db.flush()
     
     # The points are paid out as LACES in the same transaction as the check-in
-    reward = laces_service.apply_laces(
-        db, user_id, total_points, 'CHECKIN_REWARD',
-        description=f"Checked in at {dropzone.name} (streak {streak_count})",
-        reference_id=str(checkin.id),
-    )
+    if total_points > 0:
+        laces_balance = laces_service.apply_laces(
+            db, user_id, total_points, 'CHECKIN_REWARD',
+            description=f"Checked in at {dropzone.name} (streak {streak_count})",
+            reference_id=str(checkin.id),
+        ).balance_after
+    else:
+        laces_balance = db.query(User.laces_balance).filter(User.user_id == user_id).scalar()
     db.commit()
     DROPZONE_CHECKINS.inc()
     
@@ -383,12 +440,12 @@ async def check_in_to_dropzone(
         "distance_from_center": distance,
         "streak_count": streak_count,
         "points_earned": total_points,
-        "laces_balance": reward.balance_after,
-        "message": f"Successfully checked in! Streak: {streak_count}, Points: {total_points}"
+        "laces_balance": laces_balance,
+        "message": f"Successfully checked in! Streak: {streak_count}. {reward_note}"
     }
 
 @router.get("/v1/dropzones/{dropzone_id}")
-async def get_dropzone_details(
+def get_dropzone_details(
     dropzone_id: UUID4,
     db: Session = Depends(get_db),
     viewer: Optional[User] = Depends(get_optional_user),
@@ -454,22 +511,24 @@ async def get_dropzone_details(
     }
 
 @router.post("/v1/dropzones/{dropzone_id}/join")
-async def join_dropzone(
+def join_dropzone(
     dropzone_id: UUID4,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Join a dropzone as a member"""
     user_id = current_user.user_id
+    lock_user(db, user_id)
     
-    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
+    # Locked so two people cannot both take the last free place
+    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).with_for_update().first()
     if not dropzone:
-        raise HTTPException(status_code=404, detail="Dropzone not found")
+        raise refuse(db, 404, "Dropzone not found")
     
     # There is no invitation mechanism yet, so nobody can join a private zone:
     # to an outsider it does not exist, and members are already in.
     if not dropzone.is_public and not is_member(db, dropzone_id, current_user):
-        raise HTTPException(status_code=404, detail="Dropzone not found")
+        raise refuse(db, 404, "Dropzone not found")
     
     # Check if already a member
     existing_member = db.query(DropZoneMember).filter(
@@ -480,14 +539,14 @@ async def join_dropzone(
     ).first()
     
     if existing_member:
-        raise HTTPException(status_code=400, detail="Already a member")
+        raise refuse(db, 400, "Already a member")
     
     if dropzone.max_capacity is not None:
         member_count = db.query(func.count(DropZoneMember.id)).filter(
             DropZoneMember.dropzone_id == dropzone_id
         ).scalar()
         if member_count >= dropzone.max_capacity:
-            raise HTTPException(status_code=409, detail="Dropzone is at capacity")
+            raise refuse(db, 409, "Dropzone is at capacity")
     
     # Add as member
     member = DropZoneMember(

@@ -45,7 +45,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except ValueError:
+        # passlib refuses passwords with NUL bytes or over 4096 characters; no stored
+        # hash can match those, so they are simply wrong passwords, not server errors.
+        return False
 
 
 def get_password_hash(password):

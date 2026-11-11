@@ -4,6 +4,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 
+DOCS_PATHS = frozenset({"/docs", "/redoc", "/docs/oauth2-redirect"})
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Inject strict HTTP headers on every response."""
 
@@ -16,7 +19,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        response.headers.setdefault("Content-Security-Policy", "default-src 'self'")
+        # The interactive API docs load their script and stylesheet from a CDN and use an
+        # inline script; the strict policy made /docs and /redoc render as blank pages.
+        if request.url.path not in DOCS_PATHS:
+            response.headers.setdefault("Content-Security-Policy", "default-src 'self'")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 

@@ -15,6 +15,8 @@ class PasswordPolicy:
 
     @classmethod
     def validate(cls, password: str) -> Tuple[bool, str]:
+        if "\x00" in password:
+            return False, "Password must not contain NUL bytes."
         if len(password) < cls.min_length:
             return False, f"Password must be at least {cls.min_length} characters."
         if len(password.encode("utf-8")) > cls.max_bytes:

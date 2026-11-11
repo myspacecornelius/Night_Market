@@ -42,7 +42,7 @@ def test_check_in_works_for_zones_with_a_time_window(client, make_user, auth_hea
 def test_check_in_pays_laces_once_per_day(client, db_session, make_user, auth_headers):
     user = make_user(laces_balance=100)
     headers = auth_headers(user)
-    zone = _create(client, headers)
+    zone = _create(client, auth_headers(make_user()))
 
     first = client.post(f"/v1/dropzones/{zone['id']}/checkin", json=HERE, headers=headers)
 
@@ -143,3 +143,90 @@ def test_heatmap_only_aggregates_public_posts_and_handles_any_bbox(client, make_
 
     assert client.post("/v1/heatmap/refresh").status_code == 401
     assert client.post("/v1/heatmap/refresh", headers=headers).status_code == 200
+
+
+def test_owners_earn_nothing_at_their_own_zone(client, db_session, make_user, auth_headers):
+    owner = make_user(laces_balance=100)
+    headers = auth_headers(owner)
+    zone = _create(client, headers)
+
+    checked_in = client.post(f"/v1/dropzones/{zone['id']}/checkin", json=HERE, headers=headers)
+
+    assert checked_in.status_code == 200  # the visit still counts
+    assert checked_in.json()["points_earned"] == 0 and checked_in.json()["laces_balance"] == 100
+    db_session.expire_all()
+    assert owner.laces_balance == 100
+    assert db_session.query(LacesLedger).filter(LacesLedger.user_id == owner.user_id).count() == 0
+
+
+def test_check_in_rewards_are_capped_per_day_across_zones(client, db_session, make_user, auth_headers):
+    from services.routers.dropzones_ext import MAX_REWARDED_CHECKINS_PER_DAY
+
+    visitor = make_user(laces_balance=100)
+    headers = auth_headers(visitor)
+    # zones from several owners: making more zones must not make more LACES
+    zones = [_create(client, auth_headers(make_user())) for _ in range(MAX_REWARDED_CHECKINS_PER_DAY + 2)]
+
+    earned = [
+        client.post(f"/v1/dropzones/{zone['id']}/checkin", json=HERE, headers=headers).json()["points_earned"]
+        for zone in zones
+    ]
+
+    assert earned == [10] * MAX_REWARDED_CHECKINS_PER_DAY + [0, 0]
+    db_session.expire_all()
+    assert visitor.laces_balance == 100 + 10 * MAX_REWARDED_CHECKINS_PER_DAY
+
+
+def test_zone_creation_and_check_in_radius_are_limited(client, make_user, auth_headers):
+    from services.routers.dropzones_ext import MAX_DROPZONES_CREATED_PER_DAY
+
+    headers = auth_headers(make_user())
+
+    # a 50 km check-in radius used to let one claimed position reach a whole region
+    too_wide = client.post("/v1/dropzones", json={"name": "x", **CENTER, "check_in_radius": 5000}, headers=headers)
+    assert too_wide.status_code == 422
+
+    for _ in range(MAX_DROPZONES_CREATED_PER_DAY):
+        _create(client, headers)
+    one_more = client.post("/v1/dropzones", json={"name": "x", **CENTER}, headers=headers)
+    assert one_more.status_code == 429
+
+
+def test_the_database_refuses_duplicate_members_and_same_day_check_ins(client, db_session, make_user, auth_headers):
+    import pytest
+    from sqlalchemy import func
+    from sqlalchemy.exc import IntegrityError
+
+    from services.models.dropzone import DropZoneCheckIn, DropZoneMember
+
+    owner, visitor = make_user(), make_user()
+    zone = _create(client, auth_headers(owner))
+    assert client.post(f"/v1/dropzones/{zone['id']}/join", headers=auth_headers(visitor)).status_code == 200
+    assert client.post(f"/v1/dropzones/{zone['id']}/checkin", json=HERE, headers=auth_headers(visitor)).status_code == 200
+
+    # what a second simultaneous request used to insert
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(DropZoneMember(dropzone_id=zone["id"], user_id=visitor.user_id))
+            db_session.flush()
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(DropZoneCheckIn(
+                dropzone_id=zone["id"], user_id=visitor.user_id, distance_from_center=1.0,
+                check_in_location=func.ST_GeogFromText("POINT(-71.06 42.36)"),
+            ))
+            db_session.flush()
+
+
+def test_handlers_that_wait_for_row_locks_run_off_the_event_loop():
+    """An `async def` handler blocked on a row lock stalls its whole server worker:
+    the request holding the lock needs the same event loop to finish and release it."""
+    import inspect
+
+    from services.routers import auth, dropzones_ext, laces
+
+    for handler in (
+        dropzones_ext.create_dropzone, dropzones_ext.check_in_to_dropzone, dropzones_ext.join_dropzone,
+        laces.claim_daily_stipend, laces.boost_post_with_laces, auth.refresh_access_token,
+    ):
+        assert not inspect.iscoroutinefunction(handler), handler.__name__

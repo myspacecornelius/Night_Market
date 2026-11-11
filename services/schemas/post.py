@@ -1,6 +1,6 @@
 
-from pydantic import BaseModel, UUID4, ConfigDict, Field
-from typing import Optional, List
+from pydantic import BaseModel, UUID4, ConfigDict, Field, StringConstraints
+from typing import Annotated, Optional, List
 from datetime import datetime
 from enum import Enum
 
@@ -21,11 +21,16 @@ class Visibility(str, Enum):
     private = 'private'
 
 
+# One tag. Limiting only how many tags a post has let a single post carry megabytes of
+# "tags" into every feed page and cache entry.
+Tag = Annotated[str, StringConstraints(min_length=1, max_length=50)]
+
+
 class PostBase(BaseModel):
     post_type: PostType = PostType.GENERAL
     content_text: Optional[str] = Field(None, max_length=5000)
     media_url: Optional[str] = Field(None, max_length=500)
-    tags: Optional[List[str]] = Field(None, max_length=20)
+    tags: Optional[List[Tag]] = Field(None, max_length=20)
     # Optional geo tags; a plain post ignores them, a hyperlocal post requires them
     geo_tag_lat: Optional[float] = Field(None, ge=-90, le=90)
     geo_tag_long: Optional[float] = Field(None, ge=-180, le=180)

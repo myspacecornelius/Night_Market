@@ -158,3 +158,167 @@ def test_heatmap_cache_keys_ignore_cosmetic_differences_in_the_query(client):
     assert client.get("/v1/heatmap?bbox=-71.20000001,42.2000,-70.9,42.50000004").status_code == 200
 
     assert len(list(redis_client.scan_iter("heatmap:*"))) == 1
+
+
+def _register_and_login(client, username="rotator"):
+    registered = client.post(
+        "/users/",
+        json={"username": username, "email": f"{username}@example.com", "display_name": "R", "password": PASSWORD},
+    )
+    assert registered.status_code == 200, registered.text
+    return client.post("/auth/token", data={"username": username, "password": PASSWORD}).json()
+
+
+def test_a_refresh_token_can_be_claimed_only_once(client, db_session):
+    from services.core.auth import claim_refresh_session
+
+    tokens = _register_and_login(client)
+
+    # the check and the revocation are one statement: the second claim finds nothing
+    assert claim_refresh_session(db_session, tokens["refresh_token"]) is not None
+    assert claim_refresh_session(db_session, tokens["refresh_token"]) is None
+
+
+def test_replaying_a_rotated_refresh_token_ends_every_session(client, db_session):
+    from services.models.session import UserSession
+
+    first = _register_and_login(client)
+    second = client.post("/auth/refresh", json={"refresh_token": first["refresh_token"]}).json()
+    bearer = {"Authorization": f"Bearer {second['access_token']}"}
+
+    # moments later (two browser tabs racing) it is only refused
+    assert client.post("/auth/refresh", json={"refresh_token": first["refresh_token"]}).status_code == 401
+    assert client.get("/auth/me", headers=bearer).status_code == 200
+
+    # later, the old token turning up again means someone copied it
+    rotated = db_session.query(UserSession).filter(
+        UserSession.refresh_token_hash == UserSession.hash_refresh_token(first["refresh_token"])
+    ).one()
+    rotated.last_used_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db_session.commit()
+
+    assert client.post("/auth/refresh", json={"refresh_token": first["refresh_token"]}).status_code == 401
+    assert client.get("/auth/me", headers=bearer).status_code == 401
+    assert client.post("/auth/refresh", json={"refresh_token": second["refresh_token"]}).status_code == 401
+
+
+def test_oversized_bodies_are_refused_before_they_are_parsed(client, make_user, auth_headers):
+    headers = auth_headers(make_user())
+    big = "x" * (1024 * 1024 + 1)
+
+    declared = client.post("/posts/", json={"content_text": big}, headers=headers)
+    assert declared.status_code == 413
+
+    def chunks():  # no Content-Length: sent with chunked transfer encoding
+        yield b'{"content_text": "'
+        for _ in range(300):
+            yield b"x" * 4096
+        yield b'"}'
+
+    streamed = client.post("/posts/", content=chunks(), headers={**headers, "Content-Type": "application/json"})
+    assert streamed.status_code == 413
+
+    assert client.post("/posts/", json={"content_text": "small"}, headers=headers).status_code == 200
+
+
+def test_tags_have_a_length_limit(client, make_user, auth_headers):
+    headers = auth_headers(make_user())
+
+    assert client.post("/posts/", json={"content_text": "x", "tags": ["a" * 51]}, headers=headers).status_code == 422
+    assert client.post("/posts/", json={"content_text": "x", "tags": [""]}, headers=headers).status_code == 422
+    assert client.post("/posts/", json={"content_text": "x", "tags": ["jordan-1"]}, headers=headers).status_code == 200
+    zone = {"name": "x", "center_lat": 1, "center_lng": 1, "tags": ["a" * 51]}
+    assert client.post("/v1/dropzones", json=zone, headers=headers).status_code == 422
+
+
+def test_nul_bytes_nan_and_huge_passwords_are_client_errors(client, db_session, make_user, auth_headers):
+    headers = auth_headers(make_user())
+    _register_and_login(client, "nul_probe")
+
+    def status_of(response):
+        # a request that failed in the database leaves the shared test session needing a
+        # rollback; the application gives every request its own session
+        db_session.rollback()
+        return response.status_code
+
+    def login(username, password):
+        return status_of(client.post("/auth/token", data={"username": username, "password": password}))
+
+    assert login("nul_probe", "bad\x00password") == 401
+    assert login("nul_probe", "x" * 5000) == 401
+    assert login("nul\x00probe", PASSWORD) in (401, 422)
+
+    register = {"username": "nul_reg", "email": "nul_reg@example.com", "display_name": "N", "password": PASSWORD}
+    assert status_of(client.post("/users/", json={**register, "password": "Sup3r-Secret\x00Pass!"})) in (400, 422)
+    assert status_of(client.post("/users/", json={**register, "display_name": "N\x00"})) == 422
+    assert status_of(client.post("/posts/", json={"content_text": "a\x00b"}, headers=headers)) == 422
+
+    nan_body = '{"name": "x", "center_lat": NaN, "center_lng": 1}'
+    nan = client.post("/v1/dropzones", content=nan_body, headers={**headers, "Content-Type": "application/json"})
+    assert nan.status_code == 422
+
+
+def test_rate_limited_and_failed_responses_keep_cors_and_security_headers(client, monkeypatch):
+    from fastapi import APIRouter
+
+    from services.main import app
+
+    origin = {"Origin": "http://localhost:5173"}
+    probe = APIRouter()
+
+    @probe.get("/_probe/boom")
+    def boom():
+        raise RuntimeError("unexpected")
+
+    app.include_router(probe)
+    try:
+        failed = client.get("/_probe/boom", headers=origin)
+    finally:
+        app.router.routes[:] = [r for r in app.router.routes if not getattr(r, "path", "").startswith("/_probe/")]
+
+    assert failed.status_code == 500 and failed.json() == {"detail": "Internal server error"}
+    assert failed.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert failed.headers["x-content-type-options"] == "nosniff"
+
+    statuses = [client.post("/auth/token", data={"username": "nobody", "password": "x"}, headers=origin) for _ in range(12)]
+    limited = [response for response in statuses if response.status_code == 429]
+    assert limited, [response.status_code for response in statuses]
+    assert limited[0].headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert limited[0].headers["x-content-type-options"] == "nosniff"
+
+
+def test_api_docs_are_not_blocked_by_the_content_security_policy(client):
+    docs = client.get("/docs")
+    assert docs.status_code == 200
+    assert "content-security-policy" not in docs.headers
+    assert client.get("/health").headers["content-security-policy"] == "default-src 'self'"
+
+
+@pytest.mark.parametrize("environment, enable_docs, expected", [
+    ("production", None, 404),
+    ("production", "true", 200),
+    ("development", None, 200),
+])
+def test_api_docs_are_off_outside_development(environment, enable_docs, expected):
+    env = {key: value for key, value in os.environ.items() if key != "ENABLE_DOCS"}
+    env.update(PYTHONPATH=str(ROOT), ENVIRONMENT=environment, JWT_SECRET_KEY=PRIVATE_SECRET)
+    if enable_docs is not None:
+        env["ENABLE_DOCS"] = enable_docs
+    code = (
+        "from fastapi.testclient import TestClient; from services.main import app; c = TestClient(app); "
+        "print(c.get('/docs').status_code, c.get('/openapi.json').status_code)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore", "-c", code], env=env, cwd=str(ROOT), capture_output=True, text=True, timeout=120,
+    )
+
+    assert result.stdout.split()[-2:] == [str(expected), str(expected)], result.stderr[-600:]
+
+
+def test_heatmap_refresh_flushes_at_most_once_per_cooldown(client, make_user, auth_headers):
+    headers = auth_headers(make_user())
+
+    assert client.post("/v1/heatmap/refresh", headers=headers).json()["throttled"] is False
+    again = client.post("/v1/heatmap/refresh", headers=auth_headers(make_user()))
+    assert again.status_code == 200 and again.json() == {"cache_keys_cleared": 0, "throttled": True}

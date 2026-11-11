@@ -158,7 +158,7 @@ async def calculate_earning_opportunities(
 
 # API Endpoints
 @router.get("/laces/balance", response_model=LacesBalance)
-async def get_laces_balance(
+def get_laces_balance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -189,7 +189,7 @@ async def get_laces_balance(
     )
 
 @router.get("/laces/ledger", response_model=LacesLedger)
-async def get_laces_ledger(
+def get_laces_ledger(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     transaction_type: Optional[TransactionType] = Query(None),
@@ -249,7 +249,7 @@ async def grant_laces_admin(
     )
 
 @router.post("/laces/daily-stipend")
-async def claim_daily_stipend(
+def claim_daily_stipend(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -282,7 +282,7 @@ async def get_earning_opportunities(
     return await calculate_earning_opportunities(db, current_user.user_id)
 
 @router.post("/laces/boost-post/{post_id}")
-async def boost_post_with_laces(
+def boost_post_with_laces(
     post_id: UUID4,
     boost_amount: int = Query(laces_service.DEFAULT_BOOST_AMOUNT, ge=1, le=100),
     db: Session = Depends(get_db),

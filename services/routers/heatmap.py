@@ -18,6 +18,11 @@ from services.models.post import Post
 
 router = APIRouter()
 
+# The newest posts in the window; beyond this the picture does not change, only the cost
+MAX_HEATMAP_POSTS = 5000
+# The cache is shared, so one flush serves everyone: more often than this is only load
+HEATMAP_REFRESH_COOLDOWN_SECONDS = 30
+
 class HeatMapResponse(BaseModel):
     bins: List[Dict[str, Any]]
     total_posts: int
@@ -91,7 +96,7 @@ async def get_heatmap(
         if parsed_bbox:
             query = query.filter(within_bbox(Location.point, tuple(parsed_bbox)))
 
-        records = query.all()
+        records = query.order_by(Post.timestamp.desc()).limit(MAX_HEATMAP_POSTS).all()
         geohash_bins: Dict[str, Dict[str, Any]] = {}
 
         for post, lat, lng in records:
@@ -159,15 +164,20 @@ async def get_heatmap(
     return HeatMapResponse(**payload)
 
 @router.post("/heatmap/refresh", dependencies=[Depends(get_current_active_user)])
-async def refresh_heatmap_cache(
+def refresh_heatmap_cache(
     redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Clear heatmap cache to force refresh
     """
+    # Any signed-in user may ask for fresh data, but the flush itself runs at most once
+    # per cooldown for everybody; a request inside it finds a cache that is already fresh.
+    if not redis_client.set("heatmap_refresh:cooldown", "1", nx=True, ex=HEATMAP_REFRESH_COOLDOWN_SECONDS):
+        return {"cache_keys_cleared": 0, "throttled": True}
+
     # SCAN instead of KEYS so a large keyspace does not block Redis
     keys = list(redis_client.scan_iter("heatmap:*"))
     if keys:
         redis_client.delete(*keys)
     
-    return {"cache_keys_cleared": len(keys)}
+    return {"cache_keys_cleared": len(keys), "throttled": False}

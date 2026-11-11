@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from services import models
@@ -17,6 +18,9 @@ from services.models.session import UserSession
 # JWT Configuration (the secret is read and validated in core.security)
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+# Two tabs of one browser can send the same refresh token moments apart; only a replay
+# later than this is treated as a copied token.
+REFRESH_REUSE_GRACE_SECONDS = 10
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
@@ -195,23 +199,46 @@ def get_current_admin_user(current_user: models.User = Depends(get_current_activ
         )
     return current_user
 
-def validate_refresh_token(db: Session, refresh_token: str) -> Optional[UserSession]:
-    """Validate refresh token and return associated session"""
+def claim_refresh_session(db: Session, refresh_token: str) -> Optional[UserSession]:
+    """Use up a refresh token: end its session and return it, or None if it is not usable.
+
+    Checking and revoking are one conditional UPDATE, so when the same token arrives
+    several times at once exactly one request gets the session (they used to all get
+    a new token pair).
+
+    A token that was exchanged earlier and turns up again was probably copied. Which
+    of the two holders is the real one cannot be told, so every session of that
+    account is ended and the owner signs in again.
+    """
     token_hash = UserSession.hash_refresh_token(refresh_token)
-    
-    session = db.query(UserSession).filter(
-        UserSession.refresh_token_hash == token_hash,
-        UserSession.is_revoked == '0'
-    ).first()
-    
-    if not session or session.is_expired():
-        return None
-    
-    # Update last used time
-    session.last_used_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+
+    claimed_id = db.execute(
+        update(UserSession)
+        .where(
+            UserSession.refresh_token_hash == token_hash,
+            UserSession.is_revoked == '0',
+            UserSession.expires_at > now,
+        )
+        .values(is_revoked='1', revoked_reason='refresh', last_used_at=now)
+        .returning(UserSession.id)
+    ).scalar_one_or_none()
     db.commit()
-    
-    return session
+    if claimed_id is not None:
+        return db.get(UserSession, claimed_id)
+
+    replayed = db.query(UserSession).filter(
+        UserSession.refresh_token_hash == token_hash,
+        UserSession.revoked_reason == 'refresh',
+        UserSession.expires_at > now,
+    ).first()
+    if (
+        replayed is not None
+        and replayed.last_used_at is not None
+        and now - replayed.last_used_at > timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS)
+    ):
+        revoke_user_sessions(db, replayed.user_id, "refresh_reuse")
+    return None
 
 def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):
     """Revoke all sessions for a user"""
