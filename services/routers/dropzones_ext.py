@@ -10,7 +10,7 @@ import math
 
 from services.database import get_db
 from services.core import laces as laces_service
-from services.core.auth import get_current_active_user
+from services.core.auth import get_current_active_user, get_optional_user
 from services.core.geospatial import parse_bbox, within_bbox
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, DropZoneStatus, MemberRole
 from services.models.user import User
@@ -24,6 +24,26 @@ def point_coords(point) -> Coords:
     """Latitude/longitude of a PostGIS point column value."""
     shape = to_shape(point)
     return Coords(lat=shape.y, lng=shape.x)
+
+def is_member(db: Session, dropzone_id, user: Optional[User]) -> bool:
+    if user is None:
+        return False
+    return db.query(DropZoneMember.id).filter(
+        DropZoneMember.dropzone_id == dropzone_id, DropZoneMember.user_id == user.user_id
+    ).first() is not None
+
+
+def get_visible_dropzone(db: Session, dropzone_id, viewer: Optional[User]) -> DropZone:
+    """Load a dropzone the viewer may see.
+
+    A private zone (is_public = false) is indistinguishable from a missing one for
+    everyone except its members: both are a 404.
+    """
+    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
+    if dropzone is None or (not dropzone.is_public and not is_member(db, dropzone_id, viewer)):
+        raise HTTPException(status_code=404, detail="Dropzone not found")
+    return dropzone
+
 
 # Pydantic models for API
 def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -163,10 +183,16 @@ async def list_dropzones(
     active: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    viewer: Optional[User] = Depends(get_optional_user),
 ):
-    """List dropzones with optional spatial filtering"""
-    query = db.query(DropZone)
+    """List public dropzones (and private ones the caller belongs to) with optional spatial filtering"""
+    visible = DropZone.is_public.is_(True)
+    if viewer is not None:
+        visible = or_(visible, DropZone.id.in_(
+            db.query(DropZoneMember.dropzone_id).filter(DropZoneMember.user_id == viewer.user_id)
+        ))
+    query = db.query(DropZone).filter(visible)
     
     # Filter by status if active parameter provided
     if active is not None:
@@ -247,10 +273,8 @@ async def check_in_to_dropzone(
     current_user: User = Depends(get_current_active_user),
 ):
     """Check in to a dropzone with location verification"""
-    # Get dropzone
-    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
-    if not dropzone:
-        raise HTTPException(status_code=404, detail="Dropzone not found")
+    # Get dropzone (a private zone only exists for its members)
+    dropzone = get_visible_dropzone(db, dropzone_id, current_user)
     
     # Check if dropzone is active
     now = datetime.now(timezone.utc)
@@ -364,12 +388,11 @@ async def check_in_to_dropzone(
 @router.get("/v1/dropzones/{dropzone_id}")
 async def get_dropzone_details(
     dropzone_id: UUID4,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    viewer: Optional[User] = Depends(get_optional_user),
 ):
     """Get detailed information about a dropzone"""
-    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
-    if not dropzone:
-        raise HTTPException(status_code=404, detail="Dropzone not found")
+    dropzone = get_visible_dropzone(db, dropzone_id, viewer)
     
     # Get coordinates from PostGIS
     coords_result = point_coords(dropzone.center_point)
@@ -439,6 +462,11 @@ async def join_dropzone(
     
     dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
     if not dropzone:
+        raise HTTPException(status_code=404, detail="Dropzone not found")
+    
+    # There is no invitation mechanism yet, so nobody can join a private zone:
+    # to an outsider it does not exist, and members are already in.
+    if not dropzone.is_public and not is_member(db, dropzone_id, current_user):
         raise HTTPException(status_code=404, detail="Dropzone not found")
     
     # Check if already a member

@@ -67,8 +67,12 @@ async def get_heatmap(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid bbox format")
 
+    # Key on the parsed, rounded box (not the raw query string) so a caller cannot
+    # create an unbounded number of cache entries with cosmetic variations.
+    bbox_key = ",".join(f"{value:.3f}" for value in parsed_bbox) if parsed_bbox else "global"
+    cache_key = f"heatmap:{zoom}:{window}:{bbox_key}"
+
     tier = {"1h": "hot", "24h": "warm", "7d": "cold"}.get(window, "warm")
-    cache_key = f"heatmap:{zoom}:{window}:{bbox or 'global'}"
     cache = CacheStrategy(redis_client)
 
     async def _build_payload() -> Dict[str, Any]:

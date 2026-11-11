@@ -8,6 +8,7 @@ from typing import Tuple
 
 class PasswordPolicy:
     min_length = 12
+    max_bytes = 72  # bcrypt ignores everything after 72 bytes
     require_special = True
     require_number = True
     require_uppercase = True
@@ -16,6 +17,8 @@ class PasswordPolicy:
     def validate(cls, password: str) -> Tuple[bool, str]:
         if len(password) < cls.min_length:
             return False, f"Password must be at least {cls.min_length} characters."
+        if len(password.encode("utf-8")) > cls.max_bytes:
+            return False, f"Password must be at most {cls.max_bytes} bytes long."
         if cls.require_special and not re.search(r"[^A-Za-z0-9]", password):
             return False, "Password must include a special character."
         if cls.require_number and not re.search(r"\d", password):

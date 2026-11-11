@@ -43,8 +43,10 @@ doctor:
 setup:
 	@echo "⚙️ Setting up Dharma development environment..."
 	@if [ ! -f .env ]; then \
-		echo "📋 Copying .env.example to .env..."; \
-		cp .env.example .env; \
+		echo "📋 Creating .env from .env.example with a private JWT secret..."; \
+		secret=$$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))"); \
+		test -n "$$secret" || { echo "❌ Could not generate a JWT secret (need openssl or python3)"; exit 1; }; \
+		awk -v secret="$$secret" '/^JWT_SECRET_KEY=/ { print "JWT_SECRET_KEY=" secret; next } { print }' .env.example > .env; \
 		echo "✅ Created .env file"; \
 		echo "💡 Edit .env if you need custom configuration"; \
 	else \

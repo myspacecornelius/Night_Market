@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from services import models, schemas
 from services.database import get_db
-from services.core.security import verify_password
+from services.core.security import DUMMY_PASSWORD_HASH, verify_password
 from services.core.auth import (
     get_current_active_user,
     issue_tokens,
@@ -42,7 +42,10 @@ async def login_for_access_token(
     user = db.query(models.User).filter(
         or_(models.User.username == identifier, func.lower(models.User.email) == identifier.lower())
     ).first()
-    if not user or not verify_password(form_data.password, user.password_hash):
+    # Always run one bcrypt verification, so an unknown account takes as long to reject
+    # as a wrong password and response time does not reveal which usernames exist.
+    password_ok = verify_password(form_data.password, user.password_hash if user else DUMMY_PASSWORD_HASH)
+    if not user or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

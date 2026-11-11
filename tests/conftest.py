@@ -76,9 +76,12 @@ def client(db_session):
 
     app.dependency_overrides[database.get_db] = _get_db
 
-    # Rate-limit counters are per client IP; drop only the test client's.
-    for key in redis_client.scan_iter("rate_limit:ip:testclient:*"):
-        redis_client.delete(key)
+    # Start every test without cached responses or rate-limit counters from earlier
+    # runs: cached feeds and heatmaps would describe rows that were rolled back.
+    # Only this application's own key prefixes are touched.
+    for pattern in ("rate_limit:ip:testclient:*", "heatmap:*", "global_feed:*", "user_feed:*", "feed_version"):
+        for key in redis_client.scan_iter(pattern):
+            redis_client.delete(key)
 
     yield TestClient(app)
     app.dependency_overrides.clear()

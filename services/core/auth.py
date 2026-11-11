@@ -1,5 +1,6 @@
 import os
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -61,7 +62,7 @@ def issue_tokens(db: Session, user: models.User, request: Request) -> TokenPair:
 def verify_access_token(token: str) -> dict:
     """Verify and decode access token"""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
         username: str = payload.get("sub")
         token_type: str = payload.get("type")
         
@@ -109,28 +110,47 @@ def create_user_session(
     
     return session
 
+def _user_for_token(db: Session, payload: dict) -> Optional[models.User]:
+    """The account a verified token belongs to, or None if it no longer applies.
+
+    The user is found by the immutable ``user_id`` claim (a username can be freed and
+    registered again by someone else); tokens without it fall back to ``sub``. A token
+    issued for a login session stops working once that session is revoked or expired.
+    """
+    user = None
+    user_id = payload.get("user_id")
+    if user_id is not None:
+        try:
+            user = db.get(models.User, uuid.UUID(str(user_id)))
+        except ValueError:
+            return None
+        if user is not None and user.username != payload.get("sub"):
+            return None
+    else:
+        user = db.query(models.User).filter(models.User.username == payload.get("sub")).first()
+    if user is None:
+        return None
+
+    session_id = payload.get("sid")
+    if session_id is not None:
+        try:
+            session = db.get(UserSession, uuid.UUID(str(session_id)))
+        except ValueError:
+            return None
+        if session is None or session.user_id != user.user_id or not session.is_active():
+            return None
+    return user
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
     """Get current user from access token"""
-    payload = verify_access_token(token)
-    username = payload.get("sub")
-    
-    user = db.query(models.User).filter(models.User.username == username).first()
+    user = _user_for_token(db, verify_access_token(token))
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # A token issued for a session stops working once that session is revoked
-    session_id = payload.get("sid")
-    if session_id is not None:
-        session = db.get(UserSession, session_id)
-        if session is None or not session.is_active():
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session is no longer valid",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
 
     # Update last active time
     user.last_active_at = datetime.now(timezone.utc)
@@ -148,7 +168,7 @@ def get_optional_user(
         payload = verify_access_token(token)
     except HTTPException:
         return None
-    user = db.query(models.User).filter(models.User.username == payload.get("sub")).first()
+    user = _user_for_token(db, payload)
     return user if user is not None and user.is_active else None
 
 
@@ -162,14 +182,17 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
     return current_user
 
 def get_current_admin_user(current_user: models.User = Depends(get_current_active_user)) -> models.User:
-    """Get current admin user"""
+    """Get current admin user.
+
+    Admin rights come only from users.is_admin (see services/admin/promote.py). They used
+    to be granted to any username listed in ADMIN_USERS as well, which let anyone register
+    a listed name that was still free and become an admin.
+    """
     if not current_user.is_admin:
-        admin_users = [name.strip() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip()]
-        if current_user.username not in admin_users:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, 
-                detail="Insufficient privileges"
-            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privileges"
+        )
     return current_user
 
 def validate_refresh_token(db: Session, refresh_token: str) -> Optional[UserSession]:
