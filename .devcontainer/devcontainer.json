@@ -1,7 +1,11 @@
 {
-  "name": "Dharma Development Environment",
-  "build": {
-    "dockerfile": "Dockerfile"
+  "name": "Night Market",
+  // Python for the API and worker; Node for the web client; Docker for Postgres/PostGIS,
+  // Redis and the rest of the stack (`make up`).
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
   "customizations": {
     "codespaces": {
@@ -14,13 +18,12 @@
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "esbenp.prettier-vscode",
-        "dbaeumer.vscode-eslint",
         "charliermarsh.ruff",
         "ms-azuretools.vscode-docker"
       ]
     }
   },
-  "postCreateCommand": "if [ ! -f .env ]; then cp .env.example .env; fi && pip install -r requirements.txt && pip install pre-commit && pre-commit install",
-  "remoteUser": "root"
+  // `make setup` writes .env with a private JWT secret instead of copying the published example.
+  "postCreateCommand": "make setup && pip install -r requirements.txt && npm --prefix frontend ci",
+  "forwardPorts": [5173, 8000]
 }
