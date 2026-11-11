@@ -3,6 +3,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import CheckConstraint, text
 
+from services.core.schema_compare import include_object_filter
 from services.models import Base
 
 # Differences that are known and deliberate. Keep this list short and explained.
@@ -37,12 +38,10 @@ def _flatten(diffs):
 
 
 def test_models_match_the_migrated_schema(migrated_db):
-    def include_object(obj, name, type_, reflected, compare_to):
-        return not (type_ == "table" and name == "spatial_ref_sys")  # owned by PostGIS
-
     with migrated_db.connect() as connection:
+        # PostGIS's own tables (spatial_ref_sys; tiger and topology in the postgis image) are not ours
         context = MigrationContext.configure(
-            connection, opts={"include_object": include_object, "compare_type": True}
+            connection, opts={"include_object": include_object_filter(connection), "compare_type": True}
         )
         found = {_describe(diff) for diff in _flatten(compare_metadata(context, Base.metadata))}
 

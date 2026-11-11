@@ -11,6 +11,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from services.core.schema_compare import include_object_filter
 from services.models import Base  # Import your models here
 # Import all models to ensure they're registered with Base.metadata
 from services.models import User, Post, Like, Save, Release, Subscription, Location, LacesLedger
@@ -58,7 +59,11 @@ def run_migrations_online():
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata, compare_type=True
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            # autogenerate must not propose dropping the tables PostGIS created
+            include_object=include_object_filter(connection),
         )
 
         with context.begin_transaction():
