@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import List
+from geoalchemy2 import Geography
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, DECIMAL, JSON, Index, CheckConstraint, Enum
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
@@ -171,7 +172,7 @@ class Store(Base):
     slug = Column(String(100), unique=True, nullable=False, index=True)
     
     # Location data
-    geom = Column(String, nullable=False)  # PostGIS POINT - using string for now, will convert to Geography
+    geom = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
     address = Column(Text, nullable=True)
     city = Column(String(100), nullable=False, index=True)
     state = Column(String(50), nullable=True)
@@ -217,7 +218,8 @@ class Store(Base):
     
     # Constraints and Indexes
     __table_args__ = (
-        # Geospatial indexes (will convert to proper PostGIS later)
+        # Geospatial index
+        Index('ix_stores_geom', geom, postgresql_using='gist'),
         Index('ix_stores_city_retailer', city, retailer_type),
         Index('ix_stores_retailer_active', retailer_type, is_active),
         Index('ix_stores_features', features, postgresql_using='gin'),
