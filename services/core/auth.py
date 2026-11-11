@@ -21,6 +21,9 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 # Two tabs of one browser can send the same refresh token moments apart; only a replay
 # later than this is treated as a copied token.
 REFRESH_REUSE_GRACE_SECONDS = 10
+# How precisely users.last_active_at is kept. Recording it on every request meant one
+# UPDATE and commit of the user's row per request.
+LAST_ACTIVE_RESOLUTION = timedelta(minutes=5)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
@@ -156,10 +159,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Update last active time
-    user.last_active_at = datetime.now(timezone.utc)
-    db.commit()
-    
+    now = datetime.now(timezone.utc)
+    if user.last_active_at is None or now - user.last_active_at >= LAST_ACTIVE_RESOLUTION:
+        # updated_at is for changes to the account, not for being seen: keep it as it is
+        db.execute(
+            update(models.User)
+            .where(models.User.user_id == user.user_id)
+            .values(last_active_at=now, updated_at=models.User.updated_at)
+        )
+        db.commit()
+
     return user
 
 def get_optional_user(

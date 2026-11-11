@@ -115,3 +115,25 @@ def test_user_listing_does_not_expose_emails(client, db_session, make_user, auth
     assert len(users) == 2
     assert all("email" not in user and "laces_balance" not in user for user in users)
     assert hidden.username not in {user["username"] for user in users}
+
+
+def test_activity_is_recorded_without_a_write_on_every_request(client, db_session, make_user, auth_headers):
+    from datetime import datetime, timedelta, timezone
+
+    user = make_user()
+    headers = auth_headers(user)
+    long_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    user.last_active_at = long_ago
+    db_session.commit()
+    db_session.refresh(user)
+    updated_before = user.updated_at
+
+    assert client.get("/auth/me", headers=headers).status_code == 200
+    db_session.refresh(user)
+    first_seen = user.last_active_at
+    assert first_seen > long_ago
+    assert user.updated_at == updated_before  # being seen is not a change to the account
+
+    assert client.get("/auth/me", headers=headers).status_code == 200
+    db_session.refresh(user)
+    assert user.last_active_at == first_seen  # recorded moments ago: no second write
