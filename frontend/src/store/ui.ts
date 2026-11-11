@@ -4,8 +4,11 @@ import { persist } from 'zustand/middleware';
 type ViewMode = 'card' | 'table';
 
 interface UiState {
-  isSidebarOpen: boolean;
+  /** The navigation drawer on screens too narrow for the sidebar. */
+  isMobileNavOpen: boolean;
+  /** Called by the menu button in the top bar, which only exists on narrow screens. */
   toggleSidebar: () => void;
+  closeMobileNav: () => void;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
 }
@@ -13,16 +16,17 @@ interface UiState {
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
-      // Original state
-      isSidebarOpen: true,
-      toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+      isMobileNavOpen: false,
+      toggleSidebar: () => set((state) => ({ isMobileNavOpen: !state.isMobileNavOpen })),
+      closeMobileNav: () => set({ isMobileNavOpen: false }),
 
-      // New state
       viewMode: 'card',
       setViewMode: (mode) => set({ viewMode: mode }),
     }),
     {
       name: 'ui-preferences-storage', // unique name for localStorage key
+      // Only preferences are remembered. Whether the drawer is open right now is not one.
+      partialize: (state) => ({ viewMode: state.viewMode }),
     }
   )
 );
