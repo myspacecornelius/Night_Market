@@ -140,3 +140,24 @@ def test_leaderboards_rank_users_and_mask_anonymous_ones(client, db_session, mak
 
     assert client.get("/v1/dashboard/leaderboard?type=checkins", headers=auth_headers(me)).json()["items"] == []
     assert client.get("/v1/dashboard/leaderboard?type=nope", headers=auth_headers(me)).status_code == 422
+
+
+def test_tied_members_share_a_rank_on_both_dashboard_endpoints(client, make_user, auth_headers):
+    """New accounts all start with the same balance, so ties are the normal case. The
+    leaderboard numbered tied rows 1, 2, 3 by username while the metrics counted only
+    members strictly ahead, so the home page said "#3" where the leaderboard said "#4"."""
+    make_user(laces_balance=900)
+    tied = [make_user(laces_balance=500) for _ in range(3)]
+    make_user(laces_balance=100)
+
+    for member in tied:
+        headers = auth_headers(member)
+        board = client.get("/v1/dashboard/leaderboard?type=laces", headers=headers).json()["items"]
+        own_row = next(row for row in board if row["isCurrentUser"])
+        metrics = client.get("/v1/dashboard/metrics", headers=headers).json()
+
+        assert own_row["rank"] == 2
+        assert metrics["communityRank"] == 2
+
+    board = client.get("/v1/dashboard/leaderboard?type=laces", headers=auth_headers(tied[0])).json()["items"]
+    assert [row["rank"] for row in board] == [1, 2, 2, 2, 5]

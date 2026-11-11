@@ -260,7 +260,12 @@ def get_leaderboard(
     leaders = query.order_by(value.desc(), User.username).limit(limit).all()
 
     items = []
-    for rank, (user, amount) in enumerate(leaders, start=1):
+    rank, previous_amount = 0, None
+    for position, (user, amount) in enumerate(leaders, start=1):
+        # Members with the same value share a rank (1, 2, 2, 4), which is also how
+        # the metrics endpoint counts communityRank: members strictly ahead, plus one.
+        if amount != previous_amount:
+            rank, previous_amount = position, amount
         is_current = user.user_id == current_user.user_id
         shown = {"username": user.username, "avatar": user.avatar_url} if is_current else _public_name(user)
         items.append(

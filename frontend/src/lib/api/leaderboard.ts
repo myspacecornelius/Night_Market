@@ -13,9 +13,9 @@ export type LeaderboardType = 'laces' | 'posts' | 'checkins';
 /** One row of a board. */
 export interface LeaderboardEntry {
   /**
-   * 1-based position. Rows are ordered by value, highest first, then by username;
-   * members with equal values still get consecutive ranks. (The dashboard's
-   * communityRank counts differently: there, members with equal balances share a rank.)
+   * 1-based rank. Rows are ordered by value, highest first, then by username;
+   * members with equal values share a rank (1, 2, 2, 4), the same way the
+   * dashboard's communityRank counts.
    */
   rank: number;
   /** UUID of the member; null for an anonymous member (the caller always sees their own id). */

@@ -364,7 +364,8 @@ export default function Leaderboard() {
                   >
                     {visibleEntries.map((entry, index) => (
                       <EntryRow
-                        key={`${entry.rank}-${entry.userId ?? 'anonymous'}`}
+                        // tied members share a rank and anonymous ones have no id, so neither is unique
+                        key={entry.userId ?? `anonymous-${index}`}
                         entry={entry}
                         unit={board.unit}
                         index={index}
