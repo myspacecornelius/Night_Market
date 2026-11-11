@@ -6,9 +6,6 @@ python-multipart==0.0.33
 
 # Authentication
 PyJWT[crypto]==2.15.1
-# python-jose has an open advisory and no fixed release; the application no longer
-# imports it. It stays installed only until the last test that uses it is moved.
-python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 bcrypt==3.2.0
 

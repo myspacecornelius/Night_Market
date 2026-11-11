@@ -435,7 +435,7 @@ def test_requests_in_the_same_instant_are_each_counted(monkeypatch):
 
 def test_limiter_identifies_authenticated_callers_by_their_token():
     import fakeredis
-    from jose import jwt
+    import jwt
 
     from services.core.auth import create_access_token
     from services.core.rate_limiting import RateLimiter
