@@ -314,10 +314,18 @@ class ApiClient {
 
   /** End the session on the server (best effort) and forget the tokens. */
   logout() {
-    if (getAccessToken()) {
-      this.client.post('/auth/logout').catch(() => undefined);
-    }
+    const token = getAccessToken();
     clearTokens();
+    if (token) {
+      // Sent with the token read above. Going through the shared client did not work:
+      // its request interceptor reads the stored token after this function has
+      // returned, when it is already gone, so the server was never told.
+      void fetch(`${API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true, // let it finish while the page moves to the login screen
+      }).catch(() => undefined);
+    }
   }
 }
 

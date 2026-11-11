@@ -23,6 +23,10 @@ interface AuthProviderProps {
   children: React.ReactNode
 }
 
+/** True when a request failed because the server no longer accepts the session. */
+const isUnauthorized = (error: unknown): boolean =>
+  (error as { response?: { status?: number } } | null)?.response?.status === 401
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const queryClient = useQueryClient()
   // Read the stored token synchronously: starting as "signed out" and flipping in
@@ -33,25 +37,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const { 
     data: user, 
     isLoading: userLoading,
-    isError: userFailed,
+    error: userError,
     refetch: refetchUser 
   } = useQuery({
     queryKey: ['currentUser'],
     queryFn: () => apiClient.getCurrentUser(),
     enabled: isAuthenticated,
-    retry: false,
+    // A 401 is final (the API client has already tried to renew the session).
+    // Anything else is the API restarting, a 5xx, a 429 or a dropped connection:
+    // worth another try, and never a reason to throw the session away.
+    retry: (failureCount, error) => !isUnauthorized(error) && failureCount < 3,
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 
-  // If fetching the user fails, the stored token is no good: sign out.
-  // (React Query v5 removed useQuery's onError, so this was never called before.)
+  // Only a 401 ends the session. Signing out on every failed profile request
+  // deleted both tokens whenever the API was briefly unreachable.
   useEffect(() => {
-    if (userFailed) {
+    if (isUnauthorized(userError)) {
       apiClient.logout()
       setIsAuthenticated(false)
       queryClient.removeQueries({ queryKey: ['currentUser'] })
     }
-  }, [userFailed, queryClient])
+  }, [userError, queryClient])
 
   // Login mutation
   const loginMutation = useMutation({

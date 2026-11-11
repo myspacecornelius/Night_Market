@@ -36,33 +36,60 @@ export function endSession(): void {
 
 let refreshInFlight: Promise<string | null> | null = null;
 
+const REFRESH_LOCK = 'night-market-session-refresh';
+
+type LockManagerLike = { request: (name: string, run: () => Promise<string | null>) => Promise<string | null> };
+
+/**
+ * One renewal attempt. `seen` is the refresh token this tab held when it decided
+ * to renew. Tabs share the stored tokens, and the API accepts a refresh token only
+ * once, so another tab may already have renewed the session:
+ *  - before our turn: the stored token is no longer `seen`, and its pair is used
+ *    without asking the server;
+ *  - at the same moment: our request is refused, but by then the other tab's pair
+ *    is in storage, and that is used instead of giving up.
+ */
+async function renewSession(seen: string | null): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  if (seen !== null && refreshToken !== seen) return getAccessToken();
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!response.ok) {
+      const current = getRefreshToken();
+      return current !== null && current !== refreshToken ? getAccessToken() : null;
+    }
+    const tokens = (await response.json()) as TokenPair;
+    storeTokens(tokens);
+    return tokens.access_token;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Exchange the stored refresh token for a new pair.
- * Returns the new access token, or null when the session cannot be renewed.
- * Concurrent callers share one request, because the API rotates refresh tokens
- * and a second request with the same token would be rejected.
+ * Returns the access token to use, or null when the session cannot be renewed.
+ * Callers in this tab share one request; tabs take turns through the Web Locks
+ * API where the browser has it.
  */
 export function refreshAccessToken(): Promise<string | null> {
-  if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      const refreshToken = getRefreshToken();
-      if (!refreshToken) return null;
-      try {
-        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        if (!response.ok) return null;
-        const tokens = (await response.json()) as TokenPair;
-        storeTokens(tokens);
-        return tokens.access_token;
-      } catch {
-        return null;
-      }
-    })().finally(() => {
+  if (refreshInFlight) return refreshInFlight;
+
+  const seen = getRefreshToken();
+  const locks = (globalThis.navigator as unknown as { locks?: LockManagerLike } | undefined)?.locks;
+  const attempt: Promise<string | null> = locks
+    ? locks.request(REFRESH_LOCK, () => renewSession(seen))
+    : renewSession(seen);
+  const flight = attempt
+    .catch(() => null)
+    .finally(() => {
       refreshInFlight = null;
     });
-  }
-  return refreshInFlight;
+  refreshInFlight = flight;
+  return flight;
 }
