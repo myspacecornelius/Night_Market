@@ -2,10 +2,13 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+import logging
 import time
 import redis
 
-from services.core.rate_limiting import RateLimiter, get_rate_limit_config
+from services.core.rate_limiting import RateLimiter, get_rate_limit_for_request
+
+logger = logging.getLogger("dharma.rate_limit")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -18,19 +21,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         """Apply rate limiting to requests"""
         # Skip rate limiting for health checks and static files
-        if request.url.path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
+        if request.url.path in ["/health", "/health/ready", "/metrics", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
         
         # Skip rate limiting for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
             return await call_next(request)
         
-        # Get rate limit configuration for this route
-        route = request.url.path
-        config = get_rate_limit_config(route)
-        
         # Check rate limit
         try:
+            # The limit for this HTTP method on this exact route (not a path prefix).
+            # Per-user limits are counted against the user in the bearer token.
+            route, config = get_rate_limit_for_request(request)
+            
             rate_info = self.limiter.check_rate_limit(
                 request=request,
                 route=route,
@@ -63,8 +66,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             
         except Exception as e:
             # If rate limiting fails, log error but don't block request
-            print(f"Rate limiting error: {e}")
-            pass
+            logger.warning("Rate limiting error: %s", e)
         
         # Process the request
         response = await call_next(request)

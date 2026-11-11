@@ -1,10 +1,69 @@
 import time
+import uuid
 import redis
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from fastapi import Request, HTTPException, status
-from functools import wraps
+from jose import JWTError, jwt
+from starlette.routing import Match
 import json
-import hashlib
+
+from services.core.security import ALGORITHM, SECRET_KEY
+
+
+def authenticated_user_id(request: Request) -> Optional[str]:
+    """The user a request's bearer token was issued to, or None.
+
+    Only the signature, the expiry and the token type are checked; there is no
+    database lookup. That is enough to decide whose budget a request counts
+    against (a token that does not verify never picks its own bucket). Whether the
+    account may still act is decided by the route.
+    """
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
+    except JWTError:
+        return None
+    if payload.get("type") != "access":
+        return None
+    user_id = payload.get("user_id") or payload.get("sub")
+    return str(user_id) if user_id else None
+
+
+def _matching_route(routes, scope) -> Optional[str]:
+    for candidate in routes:
+        match, _ = candidate.matches(scope)
+        if match == Match.FULL:
+            return getattr(candidate, "path", None)
+    return None
+
+
+def resolve_route(request: Request) -> Optional[str]:
+    """Path template of the route that serves this request ("/posts/{post_id}"), or None.
+
+    Limits and counters use the template, not the raw path, so one limit covers a
+    route whatever ids are in the URL and unknown paths share a single counter.
+    """
+    scope = request.scope
+    route = scope.get("route")  # already set when called from a dependency
+    if route is not None:
+        return getattr(route, "path", None)
+    router = getattr(scope.get("app"), "router", None)
+    routes = getattr(router, "routes", ())
+    template = _matching_route(routes, scope)
+    if template is None and getattr(router, "redirect_slashes", False) and scope["path"] != "/":
+        # The router answers /posts with a redirect to /posts/ (and the reverse). The
+        # redirect is not the operation itself: it gets its own counter per target
+        # route, so it neither spends that route's limit nor is lumped with 404s.
+        path = scope["path"]
+        other = {**scope, "path": path.rstrip("/") if path.endswith("/") else path + "/"}
+        target = _matching_route(routes, other)
+        if target is not None:
+            return f"{target} (redirect)"
+    return template
+
 
 class RateLimiter:
     """Redis-based rate limiter with sliding window and multiple strategies"""
@@ -12,14 +71,18 @@ class RateLimiter:
     def __init__(self, redis_client: redis.Redis):
         self.redis = redis_client
         
-    def _get_client_id(self, request: Request) -> str:
-        """Generate client identifier for rate limiting"""
-        # Try to get user ID from token if authenticated
-        user_id = getattr(request.state, 'user_id', None)
-        if user_id:
-            return f"user:{user_id}"
+    def _get_client_id(self, request: Request, per_user: bool = False) -> str:
+        """Whose budget a request counts against.
+
+        Per-user limits follow the authenticated user (so people behind one address
+        do not share a budget); everything else, and anonymous callers, are counted
+        by IP address.
+        """
+        if per_user:
+            user_id = authenticated_user_id(request)
+            if user_id:
+                return f"user:{user_id}"
         
-        # Fall back to IP address
         ip = request.client.host if request.client else "unknown"
         return f"ip:{ip}"
     
@@ -40,7 +103,7 @@ class RateLimiter:
         
         Args:
             request: FastAPI request object
-            route: Route identifier (e.g., "/auth/token")
+            route: Name of the limit's counter (e.g., "POST /auth/token")
             max_requests: Maximum requests allowed in window
             window_seconds: Time window in seconds
             per_user: If True, apply limit per authenticated user, else per IP
@@ -48,17 +111,15 @@ class RateLimiter:
         Returns:
             Dict with rate limit info
         """
-        identifier = self._get_client_id(request)
-        
-        # Override identifier for per-user limits
-        if per_user and hasattr(request.state, 'user_id'):
-            identifier = f"user:{request.state.user_id}"
+        identifier = self._get_client_id(request, per_user)
         
         current_time = time.time()
         window_start = current_time - window_seconds
         
         # Redis key for this rate limit window
         key = self._get_key(identifier, route, str(window_seconds))
+        # Unique per request, so two requests in the same instant are both counted
+        member = f"{current_time}:{uuid.uuid4().hex}"
         
         # Use Redis sorted set for sliding window
         pipe = self.redis.pipeline()
@@ -66,23 +127,26 @@ class RateLimiter:
         # Remove expired entries
         pipe.zremrangebyscore(key, 0, window_start)
         
-        # Count current requests in window
+        # Add current request and count the window in one transaction, so
+        # concurrent requests cannot all slip in under the limit
+        pipe.zadd(key, {member: current_time})
         pipe.zcard(key)
-        
-        # Add current request
-        pipe.zadd(key, {str(current_time): current_time})
         
         # Set expiration on the key
         pipe.expire(key, window_seconds + 1)
         
         results = pipe.execute()
-        current_requests = results[1]
+        current_requests = results[2] - 1  # requests already in the window, without this one
         
         # Check if limit exceeded
         is_limited = current_requests >= max_requests
         
         # Calculate retry after time
         if is_limited:
+            # Only allowed requests stay recorded. A refused one must not push the
+            # window forward, or a client that keeps polling is never let back in.
+            self.redis.zrem(key, member)
+            
             # Get oldest request in current window
             oldest_requests = self.redis.zrange(key, 0, 0, withscores=True)
             if oldest_requests:
@@ -122,9 +186,9 @@ class RateLimiter:
             json.dumps(violation_data)
         )
         
-    def get_rate_limit_status(self, request: Request, route: str, window_seconds: int) -> Dict[str, Any]:
+    def get_rate_limit_status(self, request: Request, route: str, window_seconds: int, per_user: bool = False) -> Dict[str, Any]:
         """Get current rate limit status without incrementing counter"""
-        identifier = self._get_client_id(request)
+        identifier = self._get_client_id(request, per_user)
         current_time = time.time()
         window_start = current_time - window_seconds
         
@@ -142,29 +206,41 @@ class RateLimiter:
             "window_seconds": window_seconds
         }
 
-# Rate limit configurations for different endpoints
-RATE_LIMIT_CONFIGS = {
-    "/auth/token": {"max_requests": 5, "window": 300, "per_user": False},  # 5 per 5 minutes per IP
-    "/auth/refresh": {"max_requests": 10, "window": 300, "per_user": True},  # 10 per 5 minutes per user
-    "/auth/register": {"max_requests": 3, "window": 3600, "per_user": False},  # 3 per hour per IP
-    "/signals": {"max_requests": 100, "window": 3600, "per_user": True},  # 100 per hour per user
-    "/posts": {"max_requests": 50, "window": 3600, "per_user": True},  # 50 per hour per user
-    "default": {"max_requests": 1000, "window": 3600, "per_user": False},  # Default: 1000 per hour per IP
+# Rate limit configurations, keyed by HTTP method and exact route (the path template
+# the router matches, see resolve_route). Nothing is matched by prefix: the limit on
+# creating posts must not also cap reading feeds. "per_user" counts an authenticated
+# caller by the user in their bearer token and anyone else by IP address. Routes that
+# do the same thing name a shared "counter", so the limit cannot be doubled by
+# alternating between them.
+REGISTRATION_LIMIT: Dict[str, Any] = {"max_requests": 5, "window": 3600, "per_user": False, "counter": "register"}
+POSTING_LIMIT: Dict[str, Any] = {"max_requests": 50, "window": 3600, "per_user": True, "counter": "create-post"}
+
+RATE_LIMIT_CONFIGS: Dict[Tuple[str, str], Dict[str, Any]] = {
+    ("POST", "/auth/token"): {"max_requests": 5, "window": 300, "per_user": False},  # 5 per 5 minutes per IP
+    ("POST", "/auth/refresh"): {"max_requests": 10, "window": 300, "per_user": True},  # 10 per 5 minutes per user
+    # Registration is served on two routes: 5 per hour per IP across both
+    ("POST", "/auth/register"): REGISTRATION_LIMIT,
+    ("POST", "/users/"): REGISTRATION_LIMIT,
+    ("POST", "/v1/signals/"): {"max_requests": 100, "window": 3600, "per_user": True},  # 100 per hour per user
+    # Posts are created on two routes: 50 per hour per user across both
+    ("POST", "/posts/"): POSTING_LIMIT,
+    ("POST", "/v1/hyperlocal/signals"): POSTING_LIMIT,
 }
 
-def get_rate_limit_config(route: str) -> Dict[str, Any]:
-    """Get rate limit configuration for a route"""
-    # Try exact match first
-    if route in RATE_LIMIT_CONFIGS:
-        return RATE_LIMIT_CONFIGS[route]
-    
-    # Try pattern matching for parameterized routes
-    for pattern, config in RATE_LIMIT_CONFIGS.items():
-        if pattern != "default" and route.startswith(pattern.split("{")[0]):
-            return config
-    
-    # Return default
-    return RATE_LIMIT_CONFIGS["default"]
+# Every other route: 1000 per hour, counted per route and per user (or per IP when anonymous)
+DEFAULT_RATE_LIMIT: Dict[str, Any] = {"max_requests": 1000, "window": 3600, "per_user": True}
+
+UNMATCHED_ROUTE = "unmatched"
+
+def get_rate_limit_config(method: str, route: str) -> Dict[str, Any]:
+    """Get rate limit configuration for an HTTP method on one exact route"""
+    return RATE_LIMIT_CONFIGS.get((method.upper(), route), DEFAULT_RATE_LIMIT)
+
+def get_rate_limit_for_request(request: Request) -> Tuple[str, Dict[str, Any]]:
+    """Counter name ("POST /posts/") and limit configuration for a request"""
+    route = resolve_route(request) or UNMATCHED_ROUTE
+    config = get_rate_limit_config(request.method, route)
+    return config.get("counter") or f"{request.method} {route}", config
 
 def create_rate_limit_dependency(redis_client: redis.Redis):
     """Create a FastAPI dependency for rate limiting"""
@@ -172,8 +248,7 @@ def create_rate_limit_dependency(redis_client: redis.Redis):
     
     def rate_limit_dependency(request: Request):
         """FastAPI dependency that checks rate limits"""
-        route = request.url.path
-        config = get_rate_limit_config(route)
+        route, config = get_rate_limit_for_request(request)
         
         rate_info = limiter.check_rate_limit(
             request=request,
