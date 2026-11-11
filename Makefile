@@ -46,7 +46,8 @@ setup:
 		echo "📋 Creating .env from .env.example with a private JWT secret..."; \
 		secret=$$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))"); \
 		test -n "$$secret" || { echo "❌ Could not generate a JWT secret (need openssl or python3)"; exit 1; }; \
-		awk -v secret="$$secret" '/^JWT_SECRET_KEY=/ { print "JWT_SECRET_KEY=" secret; next } { print }' .env.example > .env; \
+		grafana=$$(openssl rand -hex 12 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(12))"); \
+		awk -v secret="$$secret" -v grafana="$$grafana" '/^JWT_SECRET_KEY=/ { print "JWT_SECRET_KEY=" secret; next } /^GRAFANA_ADMIN_PASSWORD=/ { print "GRAFANA_ADMIN_PASSWORD=" grafana; next } { print }' .env.example > .env; \
 		echo "✅ Created .env file"; \
 		echo "💡 Edit .env if you need custom configuration"; \
 	else \

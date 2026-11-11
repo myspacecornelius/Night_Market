@@ -1,0 +1,19 @@
+# Keep secrets, history and local build output out of image layers.
+# The API and worker images are built with the repository root as context.
+.git
+.github
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/venv
+frontend
