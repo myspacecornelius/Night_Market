@@ -5,6 +5,7 @@ import uuid
 
 from services.database import get_db
 from services.core import auth, locations, laces, feed
+from services.core.feed_cache import invalidate_feeds
 from services.schemas import post as post_schemas
 from services.schemas import user as user_schemas
 from services.models import user as user_models
@@ -21,7 +22,9 @@ def create_signal(
     """
     Create a new hyperlocal signal: a post pinned to a location.
     """
-    return locations.create_location_and_post(db=db, post_create=signal, user_id=current_user.user_id)
+    post = locations.create_location_and_post(db=db, post_create=signal, user_id=current_user.user_id)
+    invalidate_feeds()  # a pinned post is a post: it belongs in the feeds straight away
+    return post
 
 
 @router.get("/feed/scan", response_model=List[post_schemas.Post])
@@ -56,5 +59,6 @@ def boost_signal(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
     db.commit()
+    invalidate_feeds()  # the cached feed pages carry the old boost score
     db.refresh(current_user)
     return current_user

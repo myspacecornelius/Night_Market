@@ -12,31 +12,13 @@ import logging
 
 import redis
 
+from services.core.feed_cache import feed_version as _feed_version, invalidate_feeds as _invalidate_feeds
 from services.core.metrics import POSTS_CREATED
 from services.core.redis_client import r
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-FEED_VERSION_KEY = "feed_version"
-
-
-def _feed_version() -> Optional[str]:
-    """Current cache generation, or None when Redis is unavailable (then nothing is cached)."""
-    try:
-        return r.get(FEED_VERSION_KEY) or "0"
-    except redis.RedisError as error:
-        logger.warning("Feed cache unavailable: %s", error)
-        return None
-
-
-def _invalidate_feeds() -> None:
-    """Start a new cache generation so every cached feed page is ignored from now on."""
-    try:
-        r.incr(FEED_VERSION_KEY)
-    except redis.RedisError as error:
-        logger.warning("Could not invalidate feed cache: %s", error)
 
 
 def _cached_feed(key: str, ttl: int, load) -> list:

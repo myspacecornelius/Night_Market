@@ -7,6 +7,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from services.core import laces as laces_service
+from services.core.feed_cache import invalidate_feeds
 from services.core.auth import get_current_active_user, get_current_admin_user
 from services.database import get_db
 from services.models.dropzone import DropZoneCheckIn
@@ -298,5 +299,6 @@ def boost_post_with_laces(
         db.rollback()
         _raise_for(error)
     db.commit()
+    invalidate_feeds()  # the cached feed pages carry the old boost score
 
     return {"success": True, **result}

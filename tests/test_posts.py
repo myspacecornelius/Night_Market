@@ -147,3 +147,26 @@ def test_hyperlocal_boost_reaches_the_post(client, db_session, make_user, auth_h
     db_session.expire_all()
     assert (booster.laces_balance, author.laces_balance) == (90, 105)
     assert db_session.get(Post, post_id).boost_score == 10
+
+
+def test_pinned_posts_and_boosts_show_up_in_cached_feeds_at_once(client, make_user, auth_headers):
+    """Only POST and DELETE /posts/ started a new feed cache generation. A post pinned
+    to a place, or a boost, was missing from the cached feeds for up to a minute."""
+    author, booster = make_user(), make_user(laces_balance=100)
+
+    assert client.get("/posts/global").json() == []  # the empty feed is now cached
+
+    pinned = client.post(
+        "/v1/hyperlocal/signals", json={"content_text": "line is short", **BOSTON}, headers=auth_headers(author)
+    ).json()
+    feed = client.get("/posts/global").json()
+    assert [post["post_id"] for post in feed] == [pinned["post_id"]]
+    assert feed[0]["boost_score"] == 0
+
+    boost = client.post(f"/v1/hyperlocal/signals/{pinned['post_id']}/boost", headers=auth_headers(booster))
+    assert boost.status_code == 200
+    assert client.get("/posts/global").json()[0]["boost_score"] == 10
+
+    chosen = client.post(f"/v1/laces/boost-post/{pinned['post_id']}?boost_amount=5", headers=auth_headers(booster))
+    assert chosen.status_code == 200
+    assert client.get("/posts/global").json()[0]["boost_score"] == 15
