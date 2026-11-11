@@ -247,3 +247,25 @@ def test_startup_warmup_queues_one_task_off_the_event_loop(monkeypatch):
 
     assert calls == [((), {})]  # once, for everything
     assert ticks >= 5, "the event loop was blocked while the task was being queued"
+
+
+def test_async_route_handlers_really_await():
+    """A handler declared `async def` runs on the event loop. If all it does is make
+    blocking database calls, every other request on that worker waits for it, and one
+    that waits for a row lock can stall the worker for good. Such handlers are `def`."""
+    import inspect
+
+    from services.main import app
+
+    offenders = []
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint is None or not inspect.iscoroutinefunction(endpoint):
+            continue
+        if not endpoint.__module__.startswith("services."):
+            continue  # the framework's own documentation routes
+        source = inspect.getsource(endpoint)
+        if not any(word in source for word in ("await ", "async for", "async with")):
+            offenders.append(f"{endpoint.__module__}.{endpoint.__name__}")
+
+    assert not offenders, f"async handlers that never await: {offenders}"

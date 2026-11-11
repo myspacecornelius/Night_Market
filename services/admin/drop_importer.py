@@ -3,14 +3,16 @@ Admin tools for importing drops and stores from JSON data
 """
 import json
 import uuid
-from datetime import datetime, timedelta
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from services.database import SessionLocal
-from services.models.drop import Drop, Store, DropStore
+from services.core.geospatial import geography_point, validate_coordinates
+from services.models.drop import Drop, Store, DropStore, release_at_utc
 
 class DropImporter:
     """Import drops and stores from JSON data"""
@@ -19,7 +21,37 @@ class DropImporter:
         self.db = db or SessionLocal()
         self.imported_drops = 0
         self.imported_stores = 0
+        self.linked_drop_stores = 0
         self.errors = []
+        # Rows of this import by the key that drop_stores entries refer to
+        self._stores_by_slug: Dict[str, Store] = {}
+        self._drops_by_name: Dict[str, Drop] = {}
+    
+    @contextmanager
+    def _row(self, failure: str, row: Any, name_key: Optional[str] = None):
+        """One row of the import, in a savepoint of its own.
+
+        If anything in it fails, a lookup as much as the insert, only this row
+        is undone and reported; the rows before and after it are kept. The
+        report names the row by its ``name_key`` value, or shows the row itself
+        when it is not an object.
+        """
+        if not isinstance(row, dict):
+            shown = repr(row)
+            failure = f"{failure} {shown if len(shown) <= 60 else shown[:57] + '...'}"
+        elif name_key:
+            failure = f"{failure} {row.get(name_key, 'unknown')}"
+        try:
+            with self.db.begin_nested():
+                yield
+        except Exception as e:
+            self.errors.append(f"{failure}: {str(e)}")
+    
+    @staticmethod
+    def _require_object(row: Any) -> None:
+        """Rows are JSON objects; anything else fails its row with a clear reason."""
+        if not isinstance(row, dict):
+            raise TypeError(f"expected an object, got {type(row).__name__}")
     
     def import_from_json_file(self, file_path: str) -> Dict[str, Any]:
         """Import data from JSON file"""
@@ -51,6 +83,7 @@ class DropImporter:
                 "success": True,
                 "imported_drops": self.imported_drops,
                 "imported_stores": self.imported_stores,
+                "linked_drop_stores": self.linked_drop_stores,
                 "errors": self.errors
             }
             
@@ -61,16 +94,24 @@ class DropImporter:
     def import_stores(self, stores_data: List[Dict[str, Any]]):
         """Import stores from list of dictionaries"""
         for store_data in stores_data:
-            try:
+            with self._row("Error importing store", store_data, 'name'):
+                self._require_object(store_data)
+                
                 # Check if store already exists by slug
                 existing = self.db.query(Store).filter(Store.slug == store_data.get('slug')).first()
                 if existing:
+                    self._stores_by_slug[existing.slug] = existing
                     continue
+                
+                # PostGIS wraps out-of-range coordinates instead of rejecting them
+                latitude, longitude = float(store_data['latitude']), float(store_data['longitude'])
+                if not validate_coordinates(latitude, longitude):
+                    raise ValueError(f"coordinates out of range: {latitude}, {longitude}")
                 
                 store = Store(
                     name=store_data['name'],
                     slug=store_data['slug'],
-                    geom=f"POINT({store_data['longitude']} {store_data['latitude']})",
+                    geom=geography_point(latitude, longitude),
                     address=store_data.get('address'),
                     city=store_data['city'],
                     state=store_data.get('state'),
@@ -85,23 +126,27 @@ class DropImporter:
                     external_ids=store_data.get('external_ids', {})
                 )
                 
+                # Insert now: the session does not autoflush, and the lookups
+                # that follow have to see this row
                 self.db.add(store)
+                self.db.flush()
+                self._stores_by_slug[store.slug] = store
                 self.imported_stores += 1
-                
-            except Exception as e:
-                self.errors.append(f"Error importing store {store_data.get('name', 'unknown')}: {str(e)}")
     
     def import_drops(self, drops_data: List[Dict[str, Any]]):
         """Import drops from list of dictionaries"""
         for drop_data in drops_data:
-            try:
-                # Parse release date
+            with self._row("Error importing drop", drop_data, 'name'):
+                self._require_object(drop_data)
+                
+                # Parse release date; the row is skipped if it could not be read back
                 release_at = None
                 if drop_data.get('release_at'):
                     if isinstance(drop_data['release_at'], str):
                         release_at = datetime.fromisoformat(drop_data['release_at'].replace('Z', '+00:00'))
                     else:
                         release_at = drop_data['release_at']
+                    release_at = release_at_utc(release_at)
                 
                 # Check if drop already exists
                 existing = self.db.query(Drop).filter(
@@ -113,6 +158,7 @@ class DropImporter:
                 ).first()
                 
                 if existing:
+                    self._drops_by_name[existing.name] = existing
                     continue
                 
                 drop = Drop(
@@ -134,25 +180,32 @@ class DropImporter:
                 )
                 
                 self.db.add(drop)
+                self.db.flush()
+                self._drops_by_name[drop.name] = drop
                 self.imported_drops += 1
-                
-            except Exception as e:
-                self.errors.append(f"Error importing drop {drop_data.get('name', 'unknown')}: {str(e)}")
     
     def link_drops_to_stores(self, links_data: List[Dict[str, Any]]):
         """Link drops to stores via DropStore relationship"""
         for link_data in links_data:
-            try:
-                # Find drop and store by slug/identifier
-                drop = self.db.query(Drop).filter(
-                    Drop.name == link_data['drop_name']
+            with self._row("Error linking drop to store", link_data):
+                self._require_object(link_data)
+                
+                # Find drop and store by slug/identifier: the rows of this import
+                # first, then anything already in the database
+                drop_name, store_slug = link_data['drop_name'], link_data['store_slug']
+                drop = self._drops_by_name.get(drop_name) or self.db.query(Drop).filter(
+                    Drop.name == drop_name
+                ).order_by(Drop.created_at.desc()).first()
+                
+                store = self._stores_by_slug.get(store_slug) or self.db.query(Store).filter(
+                    Store.slug == store_slug
                 ).first()
                 
-                store = self.db.query(Store).filter(
-                    Store.slug == link_data['store_slug']
-                ).first()
-                
-                if not drop or not store:
+                missing = [what for what, row in (("drop", drop), ("store", store)) if not row]
+                if missing:
+                    self.errors.append(
+                        f"Cannot link drop '{drop_name}' to store '{store_slug}': {' and '.join(missing)} not found"
+                    )
                     continue
                 
                 # Check if link already exists
@@ -179,9 +232,8 @@ class DropImporter:
                 )
                 
                 self.db.add(drop_store)
-                
-            except Exception as e:
-                self.errors.append(f"Error linking drop to store: {str(e)}")
+                self.db.flush()
+                self.linked_drop_stores += 1
 
 def generate_demo_data() -> Dict[str, Any]:
     """Generate demo data for 4 cities"""
@@ -302,7 +354,7 @@ def generate_demo_data() -> Dict[str, Any]:
     ]
     
     # Demo drops (next 4 weeks)
-    base_date = datetime.utcnow().replace(hour=10, minute=0, second=0, microsecond=0)
+    base_date = datetime.now(timezone.utc).replace(hour=10, minute=0, second=0, microsecond=0)
     
     drops = [
         {
@@ -440,7 +492,10 @@ def seed_demo_data() -> Dict[str, Any]:
     """Seed the database with demo data"""
     importer = DropImporter()
     demo_data = generate_demo_data()
-    return importer.import_from_dict(demo_data)
+    try:
+        return importer.import_from_dict(demo_data)
+    finally:
+        importer.db.close()
 
 if __name__ == "__main__":
     # Can be run directly to seed demo data

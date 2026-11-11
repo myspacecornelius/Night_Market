@@ -1,12 +1,36 @@
 import uuid
-from datetime import datetime
-from typing import List
+from datetime import datetime, timezone
+from typing import List, Optional
 from geoalchemy2 import Geography
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, DECIMAL, JSON, Index, CheckConstraint, Enum
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from services.database import Base
+
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """release_at is timestamptz; a value set without an offset is taken as UTC."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+# PostgreSQL hands a timestamptz back in the session's time zone, so a moment in
+# the first or last year a datetime can hold may come back outside that range,
+# and the row can no longer be read. Release dates keep a year away from both ends.
+MIN_RELEASE_YEAR, MAX_RELEASE_YEAR = 2, 9998
+
+def release_at_utc(value: datetime) -> datetime:
+    """A release date to store, as an aware UTC datetime; without an offset it is UTC.
+
+    Raises ValueError for a date that could not be read back in every time zone.
+    """
+    try:
+        in_utc = as_utc(value).astimezone(timezone.utc)
+    except OverflowError:  # the offset takes it before year 1 or past year 9999
+        in_utc = None
+    if in_utc is None or not MIN_RELEASE_YEAR <= in_utc.year <= MAX_RELEASE_YEAR:
+        raise ValueError(f"release_at must be between the years {MIN_RELEASE_YEAR} and {MAX_RELEASE_YEAR}")
+    return in_utc
 
 class DropStatus:
     """Drop status constants"""
@@ -93,8 +117,9 @@ class Drop(Base):
     
     def is_upcoming(self) -> bool:
         """Check if drop is upcoming"""
+        release_at = as_utc(self.release_at)
         return self.status == DropStatus.UPCOMING and (
-            not self.release_at or self.release_at > datetime.utcnow()
+            not release_at or release_at > datetime.now(timezone.utc)
         )
     
     def is_live(self) -> bool:
@@ -126,11 +151,12 @@ class Drop(Base):
         if not self.release_at:
             return {"status": "no_date"}
         
-        now = datetime.utcnow()
-        if self.release_at <= now:
+        release_at = as_utc(self.release_at)
+        now = datetime.now(timezone.utc)
+        if release_at <= now:
             return {"status": "live_or_past"}
         
-        delta = self.release_at - now
+        delta = release_at - now
         return {
             "status": "upcoming",
             "days": delta.days,
@@ -148,7 +174,7 @@ class Drop(Base):
             "name": self.name,
             "description": self.description,
             "release_at": self.release_at.isoformat() if self.release_at else None,
-            "retail_price": float(self.retail_price) if self.retail_price else None,
+            "retail_price": float(self.retail_price) if self.retail_price is not None else None,
             "image_url": self.image_url,
             "status": self.status,
             "regions": self.regions,

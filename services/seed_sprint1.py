@@ -5,9 +5,10 @@ Run this after migrations to populate the database with demo data
 """
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Make the "services" package importable however the script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from admin.drop_importer import seed_demo_data
+from services.admin.drop_importer import seed_demo_data
 
 def main():
     """Seed the database with Sprint 1 demo data"""
@@ -21,11 +22,13 @@ def main():
             print("✅ Demo data seeded successfully!")
             print(f"📊 Created {result['imported_stores']} stores")
             print(f"👟 Created {result['imported_drops']} drops")
+            print(f"🔗 Created {result['linked_drop_stores']} drop-store links")
             
             if result["errors"]:
                 print("⚠️ Some errors occurred:")
                 for error in result["errors"]:
                     print(f"   - {error}")
+                sys.exit(1)
         else:
             print("❌ Failed to seed demo data:")
             print(f"   Error: {result.get('error', 'Unknown error')}")

@@ -1,45 +1,49 @@
 """
 Stores API - Store locations and retailer information
 """
-from typing import List, Optional
+import uuid
+from typing import Annotated, List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, StringConstraints
 
 from services.database import get_db
 from services.core.auth import get_current_admin_user
+from services.core.geospatial import geography_point, point_lat, point_lng
 from services.models.drop import Store
 from services.models.user import User
 
 router = APIRouter(prefix="/stores", tags=["stores"])
 
+# The values of retailer_type_enum; anything else is a 422, not a database error
+RetailerType = Literal[
+    'NIKE', 'ADIDAS', 'FOOTLOCKER', 'FINISH_LINE', 'CHAMPS', 'FOOTACTION',
+    'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER'
+]
+
+MAX_RADIUS_KM = 500.0
+
+# Keeps OFFSET = (page - 1) * per_page far inside PostgreSQL's bigint range
+MAX_PAGE = 100_000
+
 # Pydantic models
 class StoreCreate(BaseModel):
-    name: str
-    slug: str
-    latitude: float
-    longitude: float
+    # Surrounding whitespace is dropped from the required texts, and what is left must not be empty
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    slug: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
     address: Optional[str] = None
-    city: str
-    state: Optional[str] = None
-    country: str = "US"
-    postal_code: Optional[str] = None
-    retailer_type: str
-    phone: Optional[str] = None
-    website_url: Optional[str] = None
+    city: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    state: Optional[str] = Field(None, max_length=50)
+    country: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)] = "US"
+    postal_code: Optional[str] = Field(None, max_length=20)
+    retailer_type: RetailerType
+    phone: Optional[str] = Field(None, max_length=20)
+    website_url: Optional[str] = Field(None, max_length=500)
     features: Optional[List[str]] = None
     release_methods: Optional[List[str]] = None
-    
-    @validator('retailer_type')
-    def validate_retailer_type(cls, v):
-        valid_types = [
-            'NIKE', 'ADIDAS', 'FOOTLOCKER', 'FINISH_LINE', 'CHAMPS', 'FOOTACTION',
-            'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER'
-        ]
-        if v not in valid_types:
-            raise ValueError(f'retailer_type must be one of {valid_types}')
-        return v
 
 class StoreResponse(BaseModel):
     id: str
@@ -71,16 +75,41 @@ class StoresList(BaseModel):
     per_page: int
     has_next: bool
 
+# Coordinates are read from the geography column in SQL, next to the store row
+STORE_COORDINATES = (point_lat(Store.geom), point_lng(Store.geom))
+
+def _store_response(store: Store, latitude: float, longitude: float) -> StoreResponse:
+    return StoreResponse(
+        id=str(store.id),
+        name=store.name,
+        slug=store.slug,
+        latitude=latitude,
+        longitude=longitude,
+        address=store.address,
+        city=store.city,
+        state=store.state,
+        country=store.country,
+        retailer_type=store.retailer_type,
+        phone=store.phone,
+        website_url=store.website_url,
+        features=store.features,
+        release_methods=store.get_release_methods_display(),
+        is_verified=store.is_verified,
+        is_active=store.is_active,
+        signal_count=store.signal_count,
+        drop_count=len(store.drops) if store.drops else 0
+    )
+
 @router.get("/", response_model=StoresList)
-async def list_stores(
+def list_stores(
     city: Optional[str] = Query(None, description="Filter by city"),
-    retailer_type: Optional[str] = Query(None, description="Filter by retailer type"),
-    near_lat: Optional[float] = Query(None, description="Latitude for proximity search"),
-    near_lng: Optional[float] = Query(None, description="Longitude for proximity search"),
-    radius_km: Optional[float] = Query(10, description="Search radius in kilometers"),
+    retailer_type: Optional[RetailerType] = Query(None, description="Filter by retailer type"),
+    near_lat: Optional[float] = Query(None, ge=-90, le=90, description="Latitude for proximity search"),
+    near_lng: Optional[float] = Query(None, ge=-180, le=180, description="Longitude for proximity search"),
+    radius_km: float = Query(10, gt=0, le=MAX_RADIUS_KM, description="Search radius in kilometers"),
     verified_only: bool = Query(False, description="Show only verified stores"),
     active_only: bool = Query(True, description="Show only active stores"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     per_page: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
@@ -102,60 +131,29 @@ async def list_stores(
     if active_only:
         query = query.filter(Store.is_active == True)
     
-    # Proximity search (simplified - in production use PostGIS)
+    # Proximity search: stores within radius_km of the point, measured on the globe
+    if (near_lat is None) != (near_lng is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="near_lat and near_lng must be given together"
+        )
     if near_lat is not None and near_lng is not None:
-        # For now, use simple bounding box - will upgrade to proper distance later
-        lat_delta = radius_km / 111.0  # Approximate km to degrees
-        lng_delta = radius_km / (111.0 * abs(near_lat) / 90.0)  # Adjust for latitude
-        
         query = query.filter(
-            and_(
-                # Simple bounding box filter
-                func.substr(Store.geom, func.strpos(Store.geom, '(') + 1, func.strpos(Store.geom, ' ') - func.strpos(Store.geom, '(') - 1).cast(db.Float) >= near_lng - lng_delta,
-                func.substr(Store.geom, func.strpos(Store.geom, '(') + 1, func.strpos(Store.geom, ' ') - func.strpos(Store.geom, '(') - 1).cast(db.Float) <= near_lng + lng_delta
-            )
+            func.ST_DWithin(Store.geom, geography_point(near_lat, near_lng), radius_km * 1000)
         )
     
     # Get total count
     total = query.count()
     
     # Apply ordering and pagination
-    stores = query.order_by(
+    rows = query.add_columns(*STORE_COORDINATES).order_by(
         desc(Store.is_verified),  # Verified first
         desc(Store.signal_count),  # Most active stores
         Store.name
     ).offset((page - 1) * per_page).limit(per_page).all()
     
     # Convert to response format
-    store_responses = []
-    for store in stores:
-        # Parse coordinates from geom string (temporary until PostGIS integration)
-        try:
-            coords_str = store.geom.replace('POINT(', '').replace(')', '')
-            lng, lat = map(float, coords_str.split())
-        except:
-            lat, lng = 0.0, 0.0
-        
-        store_responses.append(StoreResponse(
-            id=str(store.id),
-            name=store.name,
-            slug=store.slug,
-            latitude=lat,
-            longitude=lng,
-            address=store.address,
-            city=store.city,
-            state=store.state,
-            country=store.country,
-            retailer_type=store.retailer_type,
-            phone=store.phone,
-            website_url=store.website_url,
-            features=store.features,
-            release_methods=store.get_release_methods_display(),
-            is_verified=store.is_verified,
-            is_active=store.is_active,
-            signal_count=store.signal_count,
-            drop_count=len(store.drops) if store.drops else 0
-        ))
+    store_responses = [_store_response(store, lat, lng) for store, lat, lng in rows]
     
     return StoresList(
         stores=store_responses,
@@ -166,43 +164,18 @@ async def list_stores(
     )
 
 @router.get("/{store_id}", response_model=StoreResponse)
-async def get_store(store_id: str, db: Session = Depends(get_db)):
+def get_store(store_id: uuid.UUID, db: Session = Depends(get_db)):
     """Get a specific store by ID"""
     
-    store = db.query(Store).filter(Store.id == store_id).first()
-    if not store:
+    row = db.query(Store, *STORE_COORDINATES).filter(Store.id == store_id).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Store not found")
     
-    # Parse coordinates
-    try:
-        coords_str = store.geom.replace('POINT(', '').replace(')', '')
-        lng, lat = map(float, coords_str.split())
-    except:
-        lat, lng = 0.0, 0.0
-    
-    return StoreResponse(
-        id=str(store.id),
-        name=store.name,
-        slug=store.slug,
-        latitude=lat,
-        longitude=lng,
-        address=store.address,
-        city=store.city,
-        state=store.state,
-        country=store.country,
-        retailer_type=store.retailer_type,
-        phone=store.phone,
-        website_url=store.website_url,
-        features=store.features,
-        release_methods=store.get_release_methods_display(),
-        is_verified=store.is_verified,
-        is_active=store.is_active,
-        signal_count=store.signal_count,
-        drop_count=len(store.drops) if store.drops else 0
-    )
+    store, lat, lng = row
+    return _store_response(store, lat, lng)
 
 @router.post("/", response_model=StoreResponse, status_code=status.HTTP_201_CREATED)
-async def create_store(
+def create_store(
     store_data: StoreCreate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
@@ -221,7 +194,7 @@ async def create_store(
     store = Store(
         name=store_data.name,
         slug=store_data.slug,
-        geom=f"POINT({store_data.longitude} {store_data.latitude})",  # Temporary format
+        geom=geography_point(store_data.latitude, store_data.longitude),
         address=store_data.address,
         city=store_data.city,
         state=store_data.state,
@@ -236,32 +209,16 @@ async def create_store(
     )
     
     db.add(store)
-    db.commit()
-    db.refresh(store)
+    db.flush()
     
-    return StoreResponse(
-        id=str(store.id),
-        name=store.name,
-        slug=store.slug,
-        latitude=store_data.latitude,
-        longitude=store_data.longitude,
-        address=store.address,
-        city=store.city,
-        state=store.state,
-        country=store.country,
-        retailer_type=store.retailer_type,
-        phone=store.phone,
-        website_url=store.website_url,
-        features=store.features,
-        release_methods=store.get_release_methods_display(),
-        is_verified=store.is_verified,
-        is_active=store.is_active,
-        signal_count=0,
-        drop_count=0
-    )
+    # Report the coordinates as stored, and build the response before committing
+    lat, lng = db.query(*STORE_COORDINATES).filter(Store.id == store.id).one()
+    response = _store_response(store, lat, lng)
+    db.commit()
+    return response
 
 @router.get("/cities/list")
-async def list_cities(db: Session = Depends(get_db)):
+def list_cities(db: Session = Depends(get_db)):
     """Get list of cities with store counts"""
     
     cities = db.query(
@@ -290,7 +247,7 @@ async def list_cities(db: Session = Depends(get_db)):
     }
 
 @router.get("/retailers/list")
-async def list_retailers(db: Session = Depends(get_db)):
+def list_retailers(db: Session = Depends(get_db)):
     """Get list of retailer types with store counts"""
     
     retailers = db.query(
@@ -315,14 +272,14 @@ async def list_retailers(db: Session = Depends(get_db)):
     }
 
 @router.get("/near/{city}")
-async def get_stores_near_city(
+def get_stores_near_city(
     city: str,
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
     """Get stores near a specific city"""
     
-    stores = db.query(Store).filter(
+    rows = db.query(Store, *STORE_COORDINATES).filter(
         and_(
             Store.city.ilike(f"%{city}%"),
             Store.is_active == True
@@ -333,30 +290,25 @@ async def get_stores_near_city(
     ).limit(limit).all()
     
     # Convert to GeoJSON for map display
-    features = []
-    for store in stores:
-        try:
-            coords_str = store.geom.replace('POINT(', '').replace(')', '')
-            lng, lat = map(float, coords_str.split())
-            
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [lng, lat]
-                },
-                "properties": {
-                    "id": str(store.id),
-                    "name": store.name,
-                    "retailer_type": store.retailer_type,
-                    "address": store.address,
-                    "is_verified": store.is_verified,
-                    "signal_count": store.signal_count,
-                    "drop_count": len(store.drops) if store.drops else 0
-                }
-            })
-        except:
-            continue
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lng, lat]
+            },
+            "properties": {
+                "id": str(store.id),
+                "name": store.name,
+                "retailer_type": store.retailer_type,
+                "address": store.address,
+                "is_verified": store.is_verified,
+                "signal_count": store.signal_count,
+                "drop_count": len(store.drops) if store.drops else 0
+            }
+        }
+        for store, lat, lng in rows
+    ]
     
     return {
         "type": "FeatureCollection",

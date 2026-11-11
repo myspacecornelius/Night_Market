@@ -1,32 +1,51 @@
 """
 Drops API - Release calendar and drop tracking
 """
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, List, Literal, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from services.database import get_db
 from services.core.auth import get_current_active_user, get_current_admin_user
-from services.models.drop import Drop, DropStatus
+from services.models.drop import Drop, DropStatus, as_utc, release_at_utc
 from services.models.user import User
 
 router = APIRouter(prefix="/drops", tags=["drops"])
 
+# The values of drop_status_enum; anything else is a 422, not a database error
+DropStatusName = Literal['upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended']
+
+# drops.retail_price is numeric(10, 2)
+MAX_RETAIL_PRICE = 99_999_999.99
+
+# Keeps OFFSET = (page - 1) * per_page far inside PostgreSQL's bigint range
+MAX_PAGE = 100_000
+
 # Pydantic models
 class DropCreate(BaseModel):
-    brand: str
-    sku: Optional[str] = None
-    name: str
+    # Surrounding whitespace is dropped, and what is left must not be empty
+    brand: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    sku: Optional[str] = Field(None, max_length=100)
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     description: Optional[str] = None
     release_at: Optional[datetime] = None
-    retail_price: Optional[float] = None
-    image_url: Optional[str] = None
+    retail_price: Optional[float] = Field(None, ge=0, le=MAX_RETAIL_PRICE)
+    image_url: Optional[str] = Field(None, max_length=500)
     regions: Optional[List[str]] = None
-    release_type: Optional[str] = None
+    release_type: Optional[str] = Field(None, max_length=50)
     links: Optional[Dict[str, Any]] = None
+
+    @field_validator('release_at')
+    @classmethod
+    def release_at_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        """A release date sent without an offset is UTC, whatever the database
+        session's time zone. One at the very ends of the calendar could be
+        stored but not read back, so it is turned down here."""
+        return release_at_utc(value) if value is not None else None
 
 class DropResponse(BaseModel):
     id: str
@@ -60,15 +79,15 @@ class DropsList(BaseModel):
     has_next: bool
 
 @router.get("/", response_model=DropsList)
-async def list_drops(
+def list_drops(
     brand: Optional[str] = Query(None, description="Filter by brand"),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: Optional[DropStatusName] = Query(None, description="Filter by status"),
     region: Optional[str] = Query(None, description="Filter by region"),
     city: Optional[str] = Query(None, description="Filter by city (via stores)"),
     from_date: Optional[datetime] = Query(None, description="From release date"),
     to_date: Optional[datetime] = Query(None, description="To release date"),
     featured_only: bool = Query(False, description="Show only featured drops"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     per_page: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
@@ -88,23 +107,23 @@ async def list_drops(
         query = query.filter(Drop.regions.any(region))
     
     if city:
-        # Filter by stores in city (join with stores table)
-        from services.models.drop import DropStore
+        # Filter by stores in city. EXISTS rather than a join: a drop sold at
+        # several stores in the city is still one row for total and paging
         from services.models.drop import Store
-        query = query.join(DropStore).join(Store).filter(Store.city.ilike(f"%{city}%"))
+        query = query.filter(Drop.stores.any(Store.city.ilike(f"%{city}%")))
     
     if from_date:
-        query = query.filter(Drop.release_at >= from_date)
+        query = query.filter(Drop.release_at >= as_utc(from_date))
     
     if to_date:
-        query = query.filter(Drop.release_at <= to_date)
+        query = query.filter(Drop.release_at <= as_utc(to_date))
     
     if featured_only:
         query = query.filter(Drop.is_featured == True)
     
     # Default date range if no dates specified (next 4 weeks)
     if not from_date and not to_date:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         future_date = now + timedelta(weeks=4)
         query = query.filter(
             or_(
@@ -132,7 +151,7 @@ async def list_drops(
             name=drop.name,
             description=drop.description,
             release_at=drop.release_at,
-            retail_price=float(drop.retail_price) if drop.retail_price else None,
+            retail_price=float(drop.retail_price) if drop.retail_price is not None else None,
             image_url=drop.image_url,
             status=drop.status,
             regions=drop.regions,
@@ -158,7 +177,7 @@ async def list_drops(
     )
 
 @router.get("/{drop_id}", response_model=DropResponse)
-async def get_drop(drop_id: str, db: Session = Depends(get_db)):
+def get_drop(drop_id: uuid.UUID, db: Session = Depends(get_db)):
     """Get a specific drop by ID"""
     
     drop = db.query(Drop).filter(Drop.id == drop_id).first()
@@ -172,7 +191,7 @@ async def get_drop(drop_id: str, db: Session = Depends(get_db)):
         name=drop.name,
         description=drop.description,
         release_at=drop.release_at,
-        retail_price=float(drop.retail_price) if drop.retail_price else None,
+        retail_price=float(drop.retail_price) if drop.retail_price is not None else None,
         image_url=drop.image_url,
         status=drop.status,
         regions=drop.regions,
@@ -188,7 +207,7 @@ async def get_drop(drop_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/", response_model=DropResponse, status_code=status.HTTP_201_CREATED)
-async def create_drop(
+def create_drop(
     drop_data: DropCreate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
@@ -227,17 +246,19 @@ async def create_drop(
     )
     
     db.add(drop)
-    db.commit()
+    db.flush()
     db.refresh(drop)
     
-    return DropResponse(
+    # Build the response before committing: if it cannot be built, nothing is
+    # saved and the client can retry instead of hitting the duplicate check
+    response = DropResponse(
         id=str(drop.id),
         brand=drop.brand,
         sku=drop.sku,
         name=drop.name,
         description=drop.description,
         release_at=drop.release_at,
-        retail_price=float(drop.retail_price) if drop.retail_price else None,
+        retail_price=float(drop.retail_price) if drop.retail_price is not None else None,
         image_url=drop.image_url,
         status=drop.status,
         regions=drop.regions,
@@ -251,10 +272,12 @@ async def create_drop(
         time_until_drop=drop.get_time_until_drop(),
         store_count=0
     )
+    db.commit()
+    return response
 
 @router.post("/{drop_id}/interest")
-async def express_interest(
-    drop_id: str,
+def express_interest(
+    drop_id: uuid.UUID,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -276,7 +299,7 @@ async def express_interest(
     }
 
 @router.get("/calendar/{city}")
-async def get_city_calendar(
+def get_city_calendar(
     city: str,
     weeks: int = Query(4, ge=1, le=12, description="Number of weeks to show"),
     db: Session = Depends(get_db)
@@ -284,7 +307,7 @@ async def get_city_calendar(
     """Get drop calendar for a specific city"""
     
     # Calculate date range
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     end_date = now + timedelta(weeks=weeks)
     
     # Query drops in this city
@@ -307,10 +330,11 @@ async def get_city_calendar(
     for week_num in range(weeks):
         week_start = current_week_start + timedelta(weeks=week_num)
         week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+        next_week_start = week_start + timedelta(weeks=1)
         
         week_drops = [
             drop for drop in drops
-            if drop.release_at and week_start <= drop.release_at <= week_end
+            if drop.release_at and week_start <= as_utc(drop.release_at) < next_week_start
         ]
         
         calendar_weeks.append({
@@ -329,10 +353,10 @@ async def get_city_calendar(
     }
 
 @router.get("/stats/overview")
-async def get_drops_stats(db: Session = Depends(get_db)):
+def get_drops_stats(db: Session = Depends(get_db)):
     """Get overall drop statistics"""
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # Basic counts
     total_drops = db.query(Drop).count()
@@ -357,15 +381,14 @@ async def get_drops_stats(db: Session = Depends(get_db)):
         func.count(Drop.id).label('count')
     ).filter(Drop.release_type.isnot(None)).group_by(Drop.release_type).all()
     
-    # This week's drops
+    # This week's drops: Monday 00:00 UTC up to, not including, next Monday
     week_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start -= timedelta(days=week_start.weekday())
-    week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
     
     this_week_drops = db.query(Drop).filter(
         and_(
             Drop.release_at >= week_start,
-            Drop.release_at <= week_end
+            Drop.release_at < week_start + timedelta(weeks=1)
         )
     ).count()
     
