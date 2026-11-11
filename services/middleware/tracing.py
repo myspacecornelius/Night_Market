@@ -44,8 +44,11 @@ class TracingMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Request-ID"] = request_id
 
+        # The details are in the message itself: the configured log format prints only
+        # the message, so as "extra" fields alone they never reached the log.
         logger.info(
-            "request_complete",
+            "%s %s -> %s in %.1f ms [%s]",
+            request.method, request.url.path, response.status_code, duration_ms, request_id,
             extra={
                 "request_id": request_id,
                 "method": request.method,

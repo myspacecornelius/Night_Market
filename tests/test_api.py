@@ -269,3 +269,16 @@ def test_async_route_handlers_really_await():
             offenders.append(f"{endpoint.__module__}.{endpoint.__name__}")
 
     assert not offenders, f"async handlers that never await: {offenders}"
+
+
+def test_request_log_lines_say_what_happened(client, caplog):
+    """The request log passed its details as logging "extra" fields, which the
+    configured format does not print: every line read just "request_complete"."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="dharma.tracing"):
+        response = client.get("/health")
+
+    line = next(record.getMessage() for record in caplog.records if record.name == "dharma.tracing")
+    assert "GET" in line and "/health" in line and "200" in line
+    assert response.headers["X-Request-ID"] in line
