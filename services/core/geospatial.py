@@ -2,6 +2,9 @@ import math
 import geohash2 as geohash
 from typing import Tuple
 
+from geoalchemy2 import Geography, Geometry
+from sqlalchemy import cast, func
+
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -82,3 +85,54 @@ def bbox_to_geohashes(min_lat: float, min_lon: float,
 def validate_coordinates(lat: float, lon: float) -> bool:
     """Validate latitude and longitude values"""
     return -90 <= lat <= 90 and -180 <= lon <= 180
+
+
+# --- PostGIS helpers ----------------------------------------------------------
+# Point columns in this schema are geography(Point, 4326). ST_X/ST_Y and planar
+# bounding boxes need geometry, so these helpers do the casts in one place.
+
+BBox = Tuple[float, float, float, float]
+
+
+def parse_bbox(bbox: str) -> BBox:
+    """Parse "min_lng,min_lat,max_lng,max_lat".
+
+    Raises ValueError unless it is exactly four finite numbers inside the valid
+    longitude/latitude ranges with min < max on both axes.
+    """
+    parts = bbox.split(",")
+    if len(parts) != 4:
+        raise ValueError("bbox must be min_lng,min_lat,max_lng,max_lat")
+    min_lng, min_lat, max_lng, max_lat = (float(part) for part in parts)
+    if not all(math.isfinite(value) for value in (min_lng, min_lat, max_lng, max_lat)):
+        raise ValueError("bbox values must be finite numbers")
+    if not (-180 <= min_lng < max_lng <= 180 and -90 <= min_lat < max_lat <= 90):
+        raise ValueError("bbox is out of range or min is not below max")
+    return min_lng, min_lat, max_lng, max_lat
+
+
+def within_bbox(column, bbox: BBox):
+    """Filter clause: the point column lies inside the planar lng/lat box.
+
+    Intersecting a geography with an envelope treats the box edges as
+    great-circle arcs, which drops rows for wide boxes and errors for a
+    whole-world box, so the comparison is done on geometry.
+    """
+    min_lng, min_lat, max_lng, max_lat = bbox
+    envelope = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
+    return func.ST_Intersects(cast(column, Geometry), envelope)
+
+
+def point_lat(column):
+    """SQL expression for the latitude of a point column."""
+    return func.ST_Y(cast(column, Geometry))
+
+
+def point_lng(column):
+    """SQL expression for the longitude of a point column."""
+    return func.ST_X(cast(column, Geometry))
+
+
+def geography_point(lat: float, lng: float):
+    """SQL expression for a geography point, e.g. as an ST_DWithin argument."""
+    return cast(func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), Geography)
