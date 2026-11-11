@@ -54,6 +54,11 @@ class DropZone(Base):
     members = relationship("DropZoneMember", back_populates="dropzone", cascade="all, delete-orphan")
     check_ins = relationship("DropZoneCheckIn", back_populates="dropzone", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        # Bounding-box filters compare geometry, not geography (see services.core.geospatial.within_bbox)
+        Index('ix_dropzones_center_planar', text('(center_point::geometry)'), postgresql_using='gist'),
+    )
+
 class DropZoneMember(Base):
     __tablename__ = 'dropzone_members'
     

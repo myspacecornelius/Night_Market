@@ -117,20 +117,24 @@ def within_bbox(column, bbox: BBox):
     Intersecting a geography with an envelope treats the box edges as
     great-circle arcs, which drops rows for wide boxes and errors for a
     whole-world box, so the comparison is done on geometry.
+
+    The column is converted with a plain geometry(column) call, which is the
+    expression the ..._planar GiST indexes are built on. A typed CAST produces a
+    different expression, and the filter then scans the whole table.
     """
     min_lng, min_lat, max_lng, max_lat = bbox
     envelope = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-    return func.ST_Intersects(cast(column, Geometry), envelope)
+    return func.ST_Intersects(func.geometry(column), envelope)
 
 
 def point_lat(column):
     """SQL expression for the latitude of a point column."""
-    return func.ST_Y(cast(column, Geometry))
+    return func.ST_Y(func.geometry(column))
 
 
 def point_lng(column):
     """SQL expression for the longitude of a point column."""
-    return func.ST_X(cast(column, Geometry))
+    return func.ST_X(func.geometry(column))
 
 
 def geography_point(lat: float, lng: float):

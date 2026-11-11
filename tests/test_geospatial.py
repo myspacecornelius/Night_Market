@@ -96,3 +96,28 @@ def test_parse_bbox_accepts_a_valid_box():
 def test_parse_bbox_rejects_malformed_boxes(bad):
     with pytest.raises(ValueError):
         parse_bbox(bad)
+
+
+def test_bounding_box_filters_can_use_an_index(db_session):
+    """within_bbox must produce the expression the *_planar GiST indexes are built on.
+
+    A typed CAST (what geoalchemy2's Geometry type compiles to) is a different
+    expression: the filter still works but scans the whole table.
+    """
+    from sqlalchemy import func, select, text
+
+    from services.core.geospatial import within_bbox
+    from services.models.dropzone import DropZone
+    from services.models.location import Location
+    from services.models.signal import Signal
+
+    db_session.execute(text("SET LOCAL enable_seqscan = off"))  # the test tables are tiny
+    for model, column, index in (
+        (Location, Location.point, "ix_locations_point_planar"),
+        (Signal, Signal.geom, "ix_signals_geom_planar"),
+        (DropZone, DropZone.center_point, "ix_dropzones_center_planar"),
+    ):
+        statement = select(func.count()).select_from(model).where(within_bbox(column, (-71.2, 42.2, -70.9, 42.5)))
+        sql = str(statement.compile(db_session.get_bind(), compile_kwargs={"literal_binds": True}))
+        plan = "\n".join(row[0] for row in db_session.execute(text("EXPLAIN " + sql)))
+        assert index in plan, f"{model.__tablename__}: the box filter does not use {index}\n{plan}"
