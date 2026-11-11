@@ -128,3 +128,26 @@ def test_signal_shows_up_in_heatmap(client, make_user, auth_headers):
     bins = heatmap.json()["bins"]
     assert bins
     assert all(isinstance(b["lat"], float) and isinstance(b["lng"], float) for b in bins)
+
+
+def test_admin_check_ignores_an_unset_admin_list(client, db_session, make_user, auth_headers, monkeypatch):
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    user = make_user()
+    user.username = ""  # an unset ADMIN_USERS used to split to [""] and match this
+    db_session.commit()
+
+    response = client.delete("/releases/00000000-0000-0000-0000-000000000000", headers=auth_headers(user))
+
+    assert response.status_code == 403
+
+
+def test_registration_validates_the_username(client):
+    def register(username):
+        return client.post(
+            "/users/",
+            json={"username": username, "email": "x@example.com", "display_name": "X", "password": PASSWORD},
+        )
+
+    assert register("").status_code == 422
+    assert register("a b").status_code == 422
+    assert register("x" * 51).status_code == 422

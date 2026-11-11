@@ -21,7 +21,7 @@ class CheckoutTaskPurchaseRequest(BaseModel):
     profile_id: str
     cost: int = Field(gt=0)  # Cost in LACES
 
-from services.core.security import get_current_user
+from services.core.auth import get_current_active_user as get_current_user
 
 @router.post("/shop/purchase-checkout-task", status_code=202)
 async def purchase_checkout_task(

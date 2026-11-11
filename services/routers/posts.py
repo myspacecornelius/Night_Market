@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from services.core.database import get_db
+from services.database import get_db
 from services.models.post import Post
 from services.schemas.post import PostCreate, Post as PostSchema
-from services.core.security import get_current_user
+from services.core.auth import get_current_active_user as get_current_user
 from services.models.user import User
 import uuid
 import json

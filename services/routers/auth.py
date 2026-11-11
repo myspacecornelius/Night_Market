@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from services import models, schemas
-from services.core.database import get_db
+from services.database import get_db
 from services.core.security import verify_password
 from services.core.auth import (
     create_token_pair, 

@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List
 import uuid
 
-from services.core.database import get_db
-from services.core import security, locations, laces, feed
+from services.database import get_db
+from services.core import auth, locations, laces, feed
 from services.schemas import post as post_schemas
 from services.schemas import user as user_schemas
 from services.models import user as user_models
@@ -16,7 +16,7 @@ router = APIRouter()
 def create_signal(
     signal: post_schemas.PostCreate,
     db: Session = Depends(get_db),
-    current_user: user_models.User = Depends(security.get_current_user),
+    current_user: user_models.User = Depends(auth.get_current_active_user),
 ):
     """
     Create a new hyperlocal signal (post).
@@ -30,7 +30,7 @@ def get_local_feed(
     longitude: float,
     radius: float = 1.0, # in kilometers
     db: Session = Depends(get_db),
-    current_user: user_models.User = Depends(security.get_current_user),
+    current_user: user_models.User = Depends(auth.get_current_active_user),
 ):
     """
     Fetch hyperlocal feed based on user's location.
@@ -42,7 +42,7 @@ def get_local_feed(
 def boost_signal(
     post_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: user_models.User = Depends(security.get_current_user),
+    current_user: user_models.User = Depends(auth.get_current_active_user),
 ):
     """
     Boost a signal using Laces.

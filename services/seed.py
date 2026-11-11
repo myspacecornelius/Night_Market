@@ -3,7 +3,7 @@ import random
 import os
 from faker import Faker
 from sqlalchemy.orm import Session
-from services.core.database import SessionLocal
+from services.database import SessionLocal
 from services.models.user import User
 from services.models.post import Post
 from services.models.release import Release

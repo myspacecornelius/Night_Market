@@ -67,16 +67,14 @@ def client(db_session):
     """API client whose requests share the test's rolled-back transaction."""
     from fastapi.testclient import TestClient
 
-    from services import database as models_database
-    from services.core import database as core_database
+    from services import database
     from services.core.redis_client import r as redis_client
     from services.main import app
 
     def _get_db():
         yield db_session
 
-    app.dependency_overrides[models_database.get_db] = _get_db
-    app.dependency_overrides[core_database.get_db] = _get_db
+    app.dependency_overrides[database.get_db] = _get_db
 
     # Rate-limit counters are per client IP; drop only the test client's.
     for key in redis_client.scan_iter("rate_limit:ip:testclient:*"):

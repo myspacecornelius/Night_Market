@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 from services.core.auth import get_current_active_user
-from services.core.database import get_db
+from services.database import get_db
 from services.core.password import PasswordPolicy
 from services.core.security import get_password_hash
 from services.models.user import User

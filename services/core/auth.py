@@ -9,17 +9,13 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from services import models
-from services.core.database import get_db
+from services.core.security import ALGORITHM, SECRET_KEY
+from services.database import get_db
 from services.models.session import UserSession
 
-# JWT Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "development-only-key-change-in-production")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+# JWT Configuration (the secret is read and validated in core.security)
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-
-if SECRET_KEY == "development-only-key-change-in-production" and os.getenv("ENVIRONMENT") == "production":
-    raise ValueError("JWT_SECRET_KEY must be set in production environment")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
@@ -142,7 +138,7 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
 def get_current_admin_user(current_user: models.User = Depends(get_current_active_user)) -> models.User:
     """Get current admin user"""
     if not current_user.is_admin:
-        admin_users = os.getenv("ADMIN_USERS", "").split(",")
+        admin_users = [name.strip() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip()]
         if current_user.username not in admin_users:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, 

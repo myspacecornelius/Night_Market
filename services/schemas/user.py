@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, UUID4, EmailStr, ConfigDict
+from pydantic import BaseModel, UUID4, EmailStr, ConfigDict, Field
 from typing import Optional
 
 class UserBase(BaseModel):
@@ -10,6 +10,8 @@ class UserBase(BaseModel):
     is_anonymous: bool = False
 
 class UserCreate(UserBase):
+    username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    display_name: str = Field(min_length=1, max_length=100)
     password: str
 
 class User(UserBase):
