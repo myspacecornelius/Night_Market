@@ -1,15 +1,16 @@
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Literal, Optional
 
 import geohash2
 import redis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from geoalchemy2 import Geometry
-from sqlalchemy import cast, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from services.core.auth import get_current_active_user
 from services.core.cache import CacheStrategy
+from services.core.geospatial import parse_bbox, point_lat, point_lng, within_bbox
 from services.core.redis_client import get_redis
 from services.database import get_db
 from services.models.location import Location
@@ -34,7 +35,7 @@ class HeatMapBin(BaseModel):
 
 def get_time_window_start(window: str) -> datetime:
     """Convert time window string to datetime start"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if window == "1h":
         return now - timedelta(hours=1)
     elif window == "24h":
@@ -44,18 +45,11 @@ def get_time_window_start(window: str) -> datetime:
     else:
         return now - timedelta(hours=24)  # default to 24h
 
-def parse_bbox(bbox_str: str) -> Optional[List[float]]:
-    """Parse bbox string 'min_lng,min_lat,max_lng,max_lat' to floats"""
-    try:
-        return [float(x) for x in bbox_str.split(',')]
-    except (ValueError, AttributeError):
-        return None
-
 @router.get("/heatmap", response_model=HeatMapResponse)
 async def get_heatmap(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
-    zoom: Optional[int] = Query(7, description="Geohash precision level (4-10)"),
-    window: Optional[str] = Query("24h", description="Time window: 1h, 24h, 7d"),
+    zoom: int = Query(7, description="Geohash precision level (4-10)"),
+    window: Literal["1h", "24h", "7d"] = Query("24h", description="Time window: 1h, 24h, 7d"),
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
 ):
@@ -66,9 +60,12 @@ async def get_heatmap(
     if zoom < 4 or zoom > 10:
         raise HTTPException(status_code=400, detail="Zoom level must be between 4 and 10")
 
-    parsed_bbox = parse_bbox(bbox) if bbox else None
-    if bbox and not parsed_bbox:
-        raise HTTPException(status_code=400, detail="Invalid bbox format")
+    parsed_bbox = None
+    if bbox:
+        try:
+            parsed_bbox = list(parse_bbox(bbox))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid bbox format")
 
     tier = {"1h": "hot", "24h": "warm", "7d": "cold"}.get(window, "warm")
     cache_key = f"heatmap:{zoom}:{window}:{bbox or 'global'}"
@@ -79,17 +76,16 @@ async def get_heatmap(
         query = (
             db.query(
                 Post,
-                func.ST_Y(cast(Location.point, Geometry)).label("lat"),
-                func.ST_X(cast(Location.point, Geometry)).label("lng"),
+                point_lat(Location.point).label("lat"),
+                point_lng(Location.point).label("lng"),
             )
             .join(Location)
-            .filter(Post.timestamp >= window_start)
+            # The heatmap is public, so it only aggregates posts anyone may see
+            .filter(Post.timestamp >= window_start, Post.visibility == "public", Post.is_archived.is_(False))
         )
 
         if parsed_bbox:
-            min_lng, min_lat, max_lng, max_lat = parsed_bbox
-            bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-            query = query.filter(func.ST_Intersects(Location.point, bbox_geom))
+            query = query.filter(within_bbox(Location.point, tuple(parsed_bbox)))
 
         records = query.all()
         geohash_bins: Dict[str, Dict[str, Any]] = {}
@@ -158,17 +154,15 @@ async def get_heatmap(
     payload = await cache.get_or_set(cache_key, loader=_build_payload, tier=tier)
     return HeatMapResponse(**payload)
 
-@router.post("/heatmap/refresh")
+@router.post("/heatmap/refresh", dependencies=[Depends(get_current_active_user)])
 async def refresh_heatmap_cache(
     redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Clear heatmap cache to force refresh
-    Used by background workers when new posts are created
     """
-    # Find all heatmap cache keys and delete them
-    pattern = "heatmap:*"
-    keys = redis_client.keys(pattern)
+    # SCAN instead of KEYS so a large keyspace does not block Redis
+    keys = list(redis_client.scan_iter("heatmap:*"))
     if keys:
         redis_client.delete(*keys)
     

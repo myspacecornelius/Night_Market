@@ -2,14 +2,16 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, and_, or_
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
-from pydantic import BaseModel, UUID4
+from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel, Field, UUID4, field_validator, model_validator
 from collections import namedtuple
 from geoalchemy2.shape import to_shape
 import math
 
 from services.database import get_db
+from services.core import laces as laces_service
 from services.core.auth import get_current_active_user
+from services.core.geospatial import parse_bbox, within_bbox
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, DropZoneStatus, MemberRole
 from services.models.user import User
 
@@ -24,19 +26,34 @@ def point_coords(point) -> Coords:
     return Coords(lat=shape.y, lng=shape.x)
 
 # Pydantic models for API
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Treat a datetime sent without an offset as UTC."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 class DropZoneCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    center_lat: float
-    center_lng: float
-    radius_meters: float = 100.0
-    check_in_radius: float = 50.0
+    name: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
+    center_lat: float = Field(ge=-90, le=90)
+    center_lng: float = Field(ge=-180, le=180)
+    radius_meters: float = Field(100.0, gt=0, le=50_000)
+    check_in_radius: float = Field(50.0, gt=0, le=50_000)
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
-    max_capacity: Optional[int] = None
-    rules: Optional[str] = None
-    tags: Optional[List[str]] = None
+    max_capacity: Optional[int] = Field(None, ge=1)
+    rules: Optional[str] = Field(None, max_length=5000)
+    tags: Optional[List[str]] = Field(None, max_length=20)
     is_public: bool = True
+
+    _utc_times = field_validator('starts_at', 'ends_at')(_as_utc)
+
+    @model_validator(mode='after')
+    def ends_after_it_starts(self):
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError('ends_at must be after starts_at')
+        return self
 
 class DropZoneResponse(BaseModel):
     id: UUID4
@@ -54,10 +71,10 @@ class DropZoneResponse(BaseModel):
     created_at: datetime
 
 class CheckInRequest(BaseModel):
-    lat: float
-    lng: float
-    message: Optional[str] = None
-    photo_url: Optional[str] = None
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    message: Optional[str] = Field(None, max_length=1000)
+    photo_url: Optional[str] = Field(None, max_length=500)
 
 def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """
@@ -100,14 +117,17 @@ async def create_dropzone(
         rules=dropzone_data.rules,
         tags=dropzone_data.tags,
         is_public=dropzone_data.is_public,
-        status=DropZoneStatus.SCHEDULED if dropzone_data.starts_at else DropZoneStatus.ACTIVE
+        status=(
+            DropZoneStatus.SCHEDULED
+            if dropzone_data.starts_at and dropzone_data.starts_at > datetime.now(timezone.utc)
+            else DropZoneStatus.ACTIVE
+        )
     )
     
     db.add(dropzone)
-    db.commit()
-    db.refresh(dropzone)
+    db.flush()
     
-    # Add owner as member with OWNER role
+    # Add owner as member with OWNER role (same transaction as the zone)
     owner_member = DropZoneMember(
         dropzone_id=dropzone.id,
         user_id=owner_id,
@@ -116,6 +136,7 @@ async def create_dropzone(
     )
     db.add(owner_member)
     db.commit()
+    db.refresh(dropzone)
     
     # Get coordinates back from PostGIS for response
     coords_result = point_coords(dropzone.center_point)
@@ -140,8 +161,8 @@ async def create_dropzone(
 async def list_dropzones(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
     active: Optional[bool] = Query(None, description="Filter by active status"),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db)
 ):
     """List dropzones with optional spatial filtering"""
@@ -150,7 +171,7 @@ async def list_dropzones(
     # Filter by status if active parameter provided
     if active is not None:
         if active:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             query = query.filter(
                 and_(
                     DropZone.status == DropZoneStatus.ACTIVE,
@@ -170,29 +191,35 @@ async def list_dropzones(
     # Apply bbox filter if provided
     if bbox:
         try:
-            min_lng, min_lat, max_lng, max_lat = [float(x) for x in bbox.split(',')]
-            bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-            query = query.filter(func.ST_Intersects(DropZone.center_point, bbox_geom))
-        except (ValueError, IndexError):
+            query = query.filter(within_bbox(DropZone.center_point, parse_bbox(bbox)))
+        except ValueError:
             raise HTTPException(status_code=400, detail="Invalid bbox format")
     
     # Apply pagination
-    dropzones = query.offset(offset).limit(limit).all()
+    dropzones = query.order_by(DropZone.created_at.desc(), DropZone.id).offset(offset).limit(limit).all()
+    
+    # Member and check-in counts for the whole page in two queries
+    zone_ids = [dropzone.id for dropzone in dropzones]
+    member_counts = dict(
+        db.query(DropZoneMember.dropzone_id, func.count(DropZoneMember.id))
+        .filter(DropZoneMember.dropzone_id.in_(zone_ids))
+        .group_by(DropZoneMember.dropzone_id)
+        .all()
+    ) if zone_ids else {}
+    check_in_counts = dict(
+        db.query(DropZoneCheckIn.dropzone_id, func.count(DropZoneCheckIn.id))
+        .filter(DropZoneCheckIn.dropzone_id.in_(zone_ids))
+        .group_by(DropZoneCheckIn.dropzone_id)
+        .all()
+    ) if zone_ids else {}
     
     # Build response with computed fields
     results = []
     for dropzone in dropzones:
         # Get coordinates from PostGIS
         coords_result = point_coords(dropzone.center_point)
-        
-        # Count members and check-ins
-        member_count = db.query(func.count(DropZoneMember.id)).filter(
-            DropZoneMember.dropzone_id == dropzone.id
-        ).scalar()
-        
-        check_in_count = db.query(func.count(DropZoneCheckIn.id)).filter(
-            DropZoneCheckIn.dropzone_id == dropzone.id
-        ).scalar()
+        member_count = member_counts.get(dropzone.id, 0)
+        check_in_count = check_in_counts.get(dropzone.id, 0)
         
         results.append(DropZoneResponse(
             id=dropzone.id,
@@ -226,7 +253,7 @@ async def check_in_to_dropzone(
         raise HTTPException(status_code=404, detail="Dropzone not found")
     
     # Check if dropzone is active
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if dropzone.status != DropZoneStatus.ACTIVE:
         raise HTTPException(status_code=400, detail="Dropzone is not active")
     
@@ -256,13 +283,13 @@ async def check_in_to_dropzone(
     
     user_id = current_user.user_id
     
-    # Check if user already checked in today
-    today = datetime.now().date()
+    # Check if user already checked in today (UTC day)
+    today_start = laces_service.start_of_utc_day(now)
     existing_checkin = db.query(DropZoneCheckIn).filter(
         and_(
             DropZoneCheckIn.dropzone_id == dropzone_id,
             DropZoneCheckIn.user_id == user_id,
-            func.date(DropZoneCheckIn.checked_in_at) == today
+            DropZoneCheckIn.checked_in_at >= today_start
         )
     ).first()
     
@@ -280,12 +307,19 @@ async def check_in_to_dropzone(
     
     streak_count = 1
     if last_checkin:
-        last_date = last_checkin.checked_in_at.date()
-        yesterday = (datetime.now() - timedelta(days=1)).date()
+        last_date = last_checkin.checked_in_at.astimezone(timezone.utc).date()
+        yesterday = (now - timedelta(days=1)).date()
         
         if last_date == yesterday:
             streak_count = last_checkin.streak_count + 1
         # If there's a gap, streak resets to 1
+    elif dropzone.max_capacity is not None:
+        # First visit: max_capacity limits how many different people may check in
+        attendees = db.query(func.count(func.distinct(DropZoneCheckIn.user_id))).filter(
+            DropZoneCheckIn.dropzone_id == dropzone_id
+        ).scalar()
+        if attendees >= dropzone.max_capacity:
+            raise HTTPException(status_code=409, detail="Dropzone is at capacity")
     
     # Calculate points based on streak
     base_points = 10
@@ -307,8 +341,15 @@ async def check_in_to_dropzone(
     )
     
     db.add(checkin)
+    db.flush()
+    
+    # The points are paid out as LACES in the same transaction as the check-in
+    reward = laces_service.apply_laces(
+        db, user_id, total_points, 'CHECKIN_REWARD',
+        description=f"Checked in at {dropzone.name} (streak {streak_count})",
+        reference_id=str(checkin.id),
+    )
     db.commit()
-    db.refresh(checkin)
     
     return {
         "success": True,
@@ -316,6 +357,7 @@ async def check_in_to_dropzone(
         "distance_from_center": distance,
         "streak_count": streak_count,
         "points_earned": total_points,
+        "laces_balance": reward.balance_after,
         "message": f"Successfully checked in! Streak: {streak_count}, Points: {total_points}"
     }
 
@@ -344,7 +386,7 @@ async def get_dropzone_details(
     today_checkins = db.query(func.count(DropZoneCheckIn.id)).filter(
         and_(
             DropZoneCheckIn.dropzone_id == dropzone_id,
-            func.date(DropZoneCheckIn.checked_in_at) == datetime.now().date()
+            DropZoneCheckIn.checked_in_at >= laces_service.start_of_utc_day()
         )
     ).scalar()
     
@@ -395,6 +437,10 @@ async def join_dropzone(
     """Join a dropzone as a member"""
     user_id = current_user.user_id
     
+    dropzone = db.query(DropZone).filter(DropZone.id == dropzone_id).first()
+    if not dropzone:
+        raise HTTPException(status_code=404, detail="Dropzone not found")
+    
     # Check if already a member
     existing_member = db.query(DropZoneMember).filter(
         and_(
@@ -405,6 +451,13 @@ async def join_dropzone(
     
     if existing_member:
         raise HTTPException(status_code=400, detail="Already a member")
+    
+    if dropzone.max_capacity is not None:
+        member_count = db.query(func.count(DropZoneMember.id)).filter(
+            DropZoneMember.dropzone_id == dropzone_id
+        ).scalar()
+        if member_count >= dropzone.max_capacity:
+            raise HTTPException(status_code=409, detail="Dropzone is at capacity")
     
     # Add as member
     member = DropZoneMember(
