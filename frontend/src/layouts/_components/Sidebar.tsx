@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Map, Zap, User, Droplets, Route, Rss, Calendar, ClipboardList } from 'lucide-react'
+import { Home, Map, Zap, User, Droplets, Route, Rss, Calendar, ClipboardList, Flame, Trophy } from 'lucide-react'
 import { useUiStore } from '@/store/ui'
 import { cn } from '@/lib/cn'
 import { Stack } from '@/components/layout/Stack'
@@ -8,6 +8,8 @@ const links = [
   { to: '/', label: 'Dashboard', icon: Home },
   { to: '/laces', label: 'LACES', icon: Zap },
   { to: '/dropzones', label: 'DropZones', icon: Droplets },
+  { to: '/heatmap', label: 'Heatmap', icon: Flame },
+  { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/thriftroutes', label: 'ThriftRoutes', icon: Route },
   { to: '/profile', label: 'Profile', icon: User },
   { to: '/feed', label: 'Feed', icon: Rss },

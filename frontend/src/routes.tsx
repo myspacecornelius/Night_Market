@@ -4,9 +4,10 @@ import { createBrowserRouter } from 'react-router-dom';
 // Existing Pages
 const AppShell = lazy(() => import('./layouts/AppShell'));
 const Dashboard = lazy(() => import('@/app/routes/dashboard'));
-const Heatmap = lazy(() => import('@/pages/Heatmap'));
-const Laces = lazy(() => import('@/pages/Laces'));
-const Dropzones = lazy(() => import('@/pages/Dropzones'));
+const Heatmap = lazy(() => import('@/app/routes/heatmap'));
+const Laces = lazy(() => import('@/app/routes/laces'));
+const Dropzones = lazy(() => import('@/app/routes/dropzones'));
+const Leaderboard = lazy(() => import('@/app/routes/leaderboard'));
 const ThriftRoutes = lazy(() => import('@/pages/ThriftRoutes'));
 const Profile = lazy(() => import('@/app/routes/profile'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
@@ -14,7 +15,7 @@ const NotFound = lazy(() => import('@/pages/NotFound'));
 const ProtectedRoute = lazy(() => import('./auth/ProtectedRoute'));
 
 // New Pages for Hyperlocal Social UI
-const Feed = lazy(() => import('@/pages/Feed'));
+const Feed = lazy(() => import('@/pages/FeedPage'));
 const Map = lazy(() => import('@/pages/Map'));
 const Drops = lazy(() => import('@/pages/Drops'));
 const Quests = lazy(() => import('@/pages/Quests'));
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       { path: 'dropzones', element: <Dropzones /> },
       { path: 'thriftroutes', element: <ThriftRoutes /> },
       { path: 'profile', element: <Profile /> },
+      { path: 'leaderboard', element: <Leaderboard /> },
       { path: 'feed', element: <Feed /> },
       { path: 'map', element: <Map /> },
       { path: 'drops', element: <Drops /> },
