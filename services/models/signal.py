@@ -1,6 +1,6 @@
 import uuid
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Enum, Text, Index, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
@@ -131,7 +131,10 @@ class Signal(Base):
         """Check if signal has expired"""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:  # not yet reloaded from the timestamptz column
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
     
     def is_active(self) -> bool:
         """Check if signal is active (not flagged, not expired, visible)"""
