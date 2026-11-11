@@ -1,7 +1,15 @@
 """The migrations and the ORM models must describe the same database."""
+import os
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import CheckConstraint, text
+from alembic.script import ScriptDirectory
+from alembic.config import Config
+from sqlalchemy import CheckConstraint, create_engine, text
 
 from services.core.schema_compare import include_object_filter
 from services.models import Base
@@ -123,3 +131,44 @@ def test_database_rejects_zero_amount_ledger_rows(db_session, make_user):
             {"user_id": user.user_id},
         )
     db_session.rollback()
+
+
+def test_migrations_build_an_empty_database(migrated_db):
+    """`alembic upgrade head`, as the API container runs it, on a database with nothing in it.
+
+    The shared test database is migrated once and reused, so a migration run that
+    silently rolls back (or only works on top of an older schema) goes unnoticed there.
+    """
+    root = Path(__file__).resolve().parent.parent
+    name = f"migrate_check_{uuid.uuid4().hex[:12]}"
+    url = migrated_db.url.set(database=name)
+    admin = create_engine(migrated_db.url, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+        fresh = create_engine(url, isolation_level="AUTOCOMMIT")
+        with fresh.connect() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+
+        env = {**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False), "PYTHONPATH": str(root)}
+        result = subprocess.run(
+            [sys.executable, "-W", "ignore", "-m", "alembic", "upgrade", "head"],
+            cwd=str(root / "services"), env=env, capture_output=True, text=True, timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+
+        config = Config(str(root / "services" / "alembic.ini"))
+        config.set_main_option("script_location", str(root / "services" / "alembic"))
+        head = ScriptDirectory.from_config(config).get_current_head()
+        with fresh.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == head
+            tables = set(connection.execute(text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            )).scalars())
+        fresh.dispose()
+        missing = {table.name for table in Base.metadata.tables.values()} - tables
+        assert not missing, f"tables the models describe but the migrations did not create: {sorted(missing)}"
+    finally:
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()

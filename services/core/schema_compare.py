@@ -22,10 +22,21 @@ def extension_owned_tables(connection: Connection) -> FrozenSet[str]:
 
 
 def include_object_filter(connection: Connection) -> Callable:
-    """An Alembic ``include_object`` hook that skips tables owned by extensions."""
-    owned = extension_owned_tables(connection)
+    """An Alembic ``include_object`` hook that skips tables owned by extensions.
+
+    The lookup runs on first use, not here. Running it while Alembic's environment is
+    being configured would begin a transaction on the connection before Alembic begins
+    its own; Alembic then treats the transaction as the caller's and never commits, so
+    every migration would be rolled back when the connection closes.
+    """
+    owned = None
 
     def include_object(obj, name, type_, reflected, compare_to):
-        return not (type_ == "table" and reflected and name in owned)
+        nonlocal owned
+        if type_ != "table" or not reflected:
+            return True
+        if owned is None:
+            owned = extension_owned_tables(connection)
+        return name not in owned
 
     return include_object
