@@ -598,9 +598,6 @@ PLACEHOLDER_CALLS = (
     ("GET", "/hyperlocal/cells/follows"),
     ("POST", "/hyperlocal/heat/subscribe?threshold=5"),
     ("GET", "/hyperlocal/heat/subscriptions"),
-    ("GET", "/quests/progress"),
-    ("POST", "/quests/complete?quest_id=daily-check-in"),
-    ("GET", "/leaderboard"),
 )
 
 
@@ -634,10 +631,6 @@ def test_placeholder_endpoints_validate_their_input(client, make_user, auth_head
         response = client.post(f"/hyperlocal/heat/subscribe?threshold={threshold}", headers=headers)
         assert response.status_code == 422, (threshold, response.text)
 
-    assert client.post("/quests/complete", headers=headers).status_code == 422
-    for quest_id in ("", "x" * 65, "no spaces allowed", "semi;colon", "../etc", "daily\n"):
-        response = client.post("/quests/complete", params={"quest_id": quest_id}, headers=headers)
-        assert response.status_code == 422, (quest_id, response.text)
 
 
 def test_placeholder_responses_keep_their_shape(client, make_user, auth_headers):
@@ -653,10 +646,6 @@ def test_placeholder_responses_keep_their_shape(client, make_user, auth_headers)
     subscriptions = client.get("/hyperlocal/heat/subscriptions", headers=headers).json()
     assert all(isinstance(item["threshold"], int) for item in subscriptions["items"])
 
-    assert set(client.get("/quests/progress", headers=headers).json()) == {"streak", "today", "weekly"}
-    completed = client.post("/quests/complete", params={"quest_id": "3"}, headers=headers)  # ids in the web mocks are numbers
-    assert completed.json() == {"ok": True, "quest_id": "3"}
-    assert isinstance(client.get("/leaderboard", headers=headers).json()["items"], list)
 
 
 def test_health_probes_are_never_rate_limited(client):

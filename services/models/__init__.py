@@ -13,9 +13,13 @@ from services.models.signal import Signal
 from services.models.drop import Drop, Store, DropStore
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn
 from services.models.heat_map_tile import HeatMapTile
+from services.models.drop_interest import DropInterest
+from services.models.notification import Notification
+from services.models.quest import QuestClaim
 
 __all__ = [
     "Base", "User", "Post", "Like", "Save", "Release", "Subscription", 
     "Location", "LacesLedger", "UserSession", "Signal", "Drop", "Store", "DropStore",
-    "DropZone", "DropZoneMember", "DropZoneCheckIn", "HeatMapTile"
+    "DropZone", "DropZoneMember", "DropZoneCheckIn", "HeatMapTile",
+    "DropInterest", "Notification", "QuestClaim",
 ]
