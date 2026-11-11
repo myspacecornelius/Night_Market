@@ -40,7 +40,10 @@ def login_for_access_token(
     """Log in with a username or e-mail address and password."""
     identifier = form_data.username.strip()
     user = db.query(models.User).filter(
-        or_(models.User.username == identifier, func.lower(models.User.email) == identifier.lower())
+        or_(
+            func.lower(models.User.username) == identifier.lower(),
+            func.lower(models.User.email) == identifier.lower(),
+        )
     ).first()
     # Always run one bcrypt verification, so an unknown account takes as long to reject
     # as a wrong password and response time does not reveal which usernames exist.

@@ -16,7 +16,7 @@ router = APIRouter()
 def register_user(user: UserCreate, db: Session) -> User:
     """Create an account. Raises 409 when the username or e-mail is taken."""
     email = user.email.lower()
-    existing = db.query(User).filter(or_(func.lower(User.email) == email, User.username == user.username)).first()
+    existing = db.query(User).filter(or_(func.lower(User.email) == email, func.lower(User.username) == user.username.lower())).first()
     if existing:
         taken = "Email" if existing.email.lower() == email else "Username"
         raise HTTPException(status_code=409, detail=f"{taken} already registered")

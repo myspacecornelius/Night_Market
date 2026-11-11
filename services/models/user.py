@@ -41,5 +41,7 @@ class User(Base):
     __table_args__ = (
         Index('ix_users_created_at', created_at),
         Index('ix_users_laces_balance', laces_balance.desc()),
+        # "Alice" and "alice" are the same account name
+        Index('uq_users_username_lower', func.lower(username), unique=True),
     )
 

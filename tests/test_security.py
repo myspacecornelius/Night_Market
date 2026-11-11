@@ -322,3 +322,30 @@ def test_heatmap_refresh_flushes_at_most_once_per_cooldown(client, make_user, au
     assert client.post("/v1/heatmap/refresh", headers=headers).json()["throttled"] is False
     again = client.post("/v1/heatmap/refresh", headers=auth_headers(make_user()))
     assert again.status_code == 200 and again.json() == {"cache_keys_cleared": 0, "throttled": True}
+
+
+def test_usernames_are_unique_ignoring_case(client):
+    def register(username, email):
+        body = {"username": username, "email": email, "display_name": "N", "password": PASSWORD}
+        return client.post("/users/", json=body).status_code
+
+    assert register("Night_Owl", "owl@example.com") == 200
+    assert register("night_owl", "other@example.com") == 409  # a look-alike of the first account
+    assert register("NIGHT_OWL", "third@example.com") == 409
+
+    # and so the name works at login however it is typed
+    assert client.post("/auth/token", data={"username": "night_owl", "password": PASSWORD}).status_code == 200
+
+
+def test_the_database_refuses_usernames_that_differ_only_by_case(db_session, make_user):
+    from sqlalchemy.exc import IntegrityError
+
+    from services.models.user import User
+
+    first = make_user()
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(User(
+                username=first.username.upper(), email="upper@example.com", display_name="U", password_hash="x",
+            ))
+            db_session.flush()
