@@ -1,14 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { format, parseISO } from 'date-fns'
 import { 
   Zap, 
   MapPin, 
   Users, 
-  TrendingUp, 
   Target,
   Activity,
-  Coins,
   Eye
 } from 'lucide-react'
 import { 
@@ -22,32 +21,35 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Badge } from '@/components/ui/badge'
 import { apiClient } from '@/lib/api-client'
+import type { DashboardActivityItem } from '@/lib/api-client'
+import type { ActivityItem } from '@/components/dashboard/RecentActivity'
 import { toast } from 'sonner'
 
-// Mock data for demonstration
-const generateMockActivityData = () => {
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  return days.map(day => ({
-    date: day,
-    signals: Math.floor(Math.random() * 20) + 5,
-    laces: Math.floor(Math.random() * 100) + 20,
-    posts: Math.floor(Math.random() * 15) + 3
-  }))
+const TIMEFRAME_DAYS = { '7d': 7, '30d': 30, '90d': 90 } as const
+
+const POST_TYPE_TITLES: Record<DashboardActivityItem['postType'], string> = {
+  SPOTTED: 'Sneaker spotted',
+  STOCK_CHECK: 'Stock check',
+  LINE_UPDATE: 'Line update',
+  GENERAL: 'New signal',
+  HEAT_CHECK: 'Heat check',
+  INTEL_REPORT: 'Intel report',
 }
 
-interface DashboardMetrics {
-  lacesBalance: number
-  lacesEarnedToday: number
-  activeSignals: number
-  nearbyActivity: number
-  communityRank: number
-  totalViews: number
-  weeklyGrowth: number
-}
+const toActivityItem = (item: DashboardActivityItem): ActivityItem => ({
+  id: item.id,
+  type: 'signal',
+  title: POST_TYPE_TITLES[item.postType] ?? 'New signal',
+  description: item.message ?? '',
+  timestamp: new Date(item.createdAt),
+  user: { id: item.id, username: item.user.username, avatar: item.user.avatar ?? undefined },
+  metadata: { signalType: item.postType },
+  stats: { views: item.views, comments: item.replies },
+})
 
 export default function Dashboard() {
+  const queryClient = useQueryClient()
   const [timeframe, setTimeframe] = useState<'7d' | '30d' | '90d'>('7d')
-  const [activityData, setActivityData] = useState(generateMockActivityData())
 
   // Fetch user data
   const { data: currentUser, isLoading: userLoading } = useQuery({
@@ -57,16 +59,26 @@ export default function Dashboard() {
     staleTime: 5 * 60 * 1000 // 5 minutes
   })
 
-  // Mock metrics - in real app, this would come from API
-  const metrics: DashboardMetrics = {
-    lacesBalance: currentUser?.laces_balance || 1250,
-    lacesEarnedToday: 45,
-    activeSignals: 12,
-    nearbyActivity: 8,
-    communityRank: 247,
-    totalViews: 1420,
-    weeklyGrowth: 12.5
-  }
+  const { data: metrics, isLoading: metricsLoading, isError: metricsFailed } = useQuery({
+    queryKey: ['dashboard', 'metrics'],
+    queryFn: () => apiClient.getDashboardMetrics(),
+  })
+
+  const { data: timeseries = [] } = useQuery({
+    queryKey: ['dashboard', 'timeseries', timeframe],
+    queryFn: () => apiClient.getDashboardTimeseries(TIMEFRAME_DAYS[timeframe]),
+  })
+
+  const { data: activity } = useQuery({
+    queryKey: ['dashboard', 'activity'],
+    queryFn: () => apiClient.getDashboardActivity(10),
+  })
+
+  const activityData = timeseries.map((point) => ({
+    ...point,
+    date: format(parseISO(point.date), 'MMM d'),
+  }))
+  const recentActivity = (activity?.items ?? []).map(toActivityItem)
 
   // Health check to test backend connectivity
   const { data: healthData } = useQuery({
@@ -78,17 +90,14 @@ export default function Dashboard() {
 
   const handleTimeframeChange = (newTimeframe: '7d' | '30d' | '90d') => {
     setTimeframe(newTimeframe)
-    // In real app, fetch new data based on timeframe
-    setActivityData(generateMockActivityData())
-    toast.success(`Switched to ${newTimeframe} view`)
   }
 
-  const handleRefreshData = () => {
-    setActivityData(generateMockActivityData())
+  const handleRefreshData = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     toast.success('Dashboard data refreshed')
   }
 
-  if (userLoading) {
+  if (userLoading || metricsLoading) {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -145,56 +154,51 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricsCard
           title="LACES Balance"
-          value={metrics.lacesBalance}
-          subtitle="Your reputation currency"
+          value={metrics?.lacesBalance ?? currentUser?.laces_balance ?? '—'}
+          subtitle={metrics ? `+${metrics.lacesEarnedToday.toLocaleString()} earned today` : 'Your reputation currency'}
           icon={Zap}
-          trend={{
-            value: 8.2,
-            label: 'vs last week',
-            isPositive: true
-          }}
+          trend={
+            metrics && metrics.weeklyGrowth !== null
+              ? {
+                  value: metrics.weeklyGrowth,
+                  label: 'earned vs last week',
+                  isPositive: metrics.weeklyGrowth >= 0
+                }
+              : undefined
+          }
           delay={0}
         />
         
         <MetricsCard
           title="Active Signals"
-          value={metrics.activeSignals}
-          subtitle="In your area"
+          value={metrics?.activeSignals ?? '—'}
+          subtitle="Public signals in the last 24 hours"
           icon={MapPin}
-          trend={{
-            value: 15.3,
-            label: 'vs yesterday',
-            isPositive: true
-          }}
           delay={0.1}
         />
         
         <MetricsCard
           title="Community Rank"
-          value={`#${metrics.communityRank}`}
-          subtitle="Out of 12,847 users"
+          value={metrics ? `#${metrics.communityRank.toLocaleString()}` : '—'}
+          subtitle={metrics ? `Out of ${metrics.totalUsers.toLocaleString()} members` : undefined}
           icon={Target}
-          trend={{
-            value: 3.1,
-            label: 'positions up',
-            isPositive: true
-          }}
           delay={0.2}
         />
         
         <MetricsCard
           title="Total Views"
-          value={metrics.totalViews}
-          subtitle="Your signals reached"
+          value={metrics?.totalViews ?? '—'}
+          subtitle={metrics ? `Across your ${metrics.signalsPosted.toLocaleString()} signals` : undefined}
           icon={Eye}
-          trend={{
-            value: metrics.weeklyGrowth,
-            label: 'this week',
-            isPositive: true
-          }}
           delay={0.3}
         />
       </div>
+
+      {metricsFailed && (
+        <p role="alert" className="text-sm text-destructive">
+          Couldn't load your dashboard metrics. Try refreshing.
+        </p>
+      )}
 
       {/* Activity Chart */}
       <ActivityChart
@@ -212,7 +216,7 @@ export default function Dashboard() {
         </div>
         
         <div className="xl:col-span-1">
-          <RecentActivity />
+          <RecentActivity activities={recentActivity} />
         </div>
       </div>
 

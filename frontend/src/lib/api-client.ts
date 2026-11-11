@@ -59,6 +59,51 @@ export interface LacesTransaction {
   created_at: string;
 }
 
+export interface DashboardMetrics {
+  lacesBalance: number;
+  lacesEarnedToday: number;
+  lacesEarnedThisWeek: number;
+  lacesEarnedLastWeek: number;
+  /** Percent change in LACES earned versus the previous 7 days; null when there is no baseline. */
+  weeklyGrowth: number | null;
+  activeSignals: number;
+  nearbyActivity: number | null;
+  communityRank: number;
+  totalUsers: number;
+  totalViews: number;
+  signalsPosted: number;
+  checkIns: number;
+  updatedAt: string;
+}
+
+export interface DashboardActivityItem {
+  id: string;
+  type: 'signal';
+  postType: Post['post_type'];
+  message: string | null;
+  createdAt: string;
+  boostScore: number;
+  views: number;
+  replies: number;
+  isOwn: boolean;
+  user: { username: string; avatar: string | null };
+}
+
+export interface DashboardActivity {
+  items: DashboardActivityItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  filter: string;
+}
+
+export interface DashboardTimeseriesPoint {
+  date: string;
+  signals: number;
+  posts: number;
+  laces: number;
+}
+
 class ApiClient {
   private client: AxiosInstance;
   private authToken: string | null = null;
@@ -206,6 +251,27 @@ class ApiClient {
   async createRelease(data: any) {
     const response = await this.client.post('/releases/', data);
     return response.data;
+  }
+
+  // Dashboard methods
+  async getDashboardMetrics(): Promise<DashboardMetrics> {
+    const response = await this.client.get<DashboardMetrics>('/v1/dashboard/metrics');
+    return response.data;
+  }
+
+  async getDashboardActivity(limit: number = 10): Promise<DashboardActivity> {
+    const response = await this.client.get<DashboardActivity>('/v1/dashboard/activity', {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  async getDashboardTimeseries(days: number): Promise<DashboardTimeseriesPoint[]> {
+    const response = await this.client.get<{ days: number; points: DashboardTimeseriesPoint[] }>(
+      '/v1/dashboard/timeseries',
+      { params: { days } },
+    );
+    return response.data.points;
   }
 
   // Health check

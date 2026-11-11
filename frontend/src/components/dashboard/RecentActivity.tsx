@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 
-interface ActivityItem {
+export interface ActivityItem {
   id: string
   type: 'signal' | 'boost' | 'join' | 'like' | 'comment' | 'achievement'
   title: string
@@ -41,65 +41,6 @@ interface ActivityItem {
     views?: number
   }
 }
-
-const mockActivities: ActivityItem[] = [
-  {
-    id: '1',
-    type: 'signal',
-    title: 'New sneaker spotted',
-    description: 'Jordan 4 "Black Cat" at Foot Locker Times Square',
-    timestamp: new Date(Date.now() - 1000 * 60 * 5), // 5 mins ago
-    user: {
-      id: 'user1',
-      username: 'SneakerHunter23',
-      avatar: 'https://github.com/shadcn.png'
-    },
-    metadata: {
-      location: 'Times Square, NYC',
-      signalType: 'SPOTTED'
-    },
-    stats: {
-      likes: 12,
-      comments: 3,
-      views: 45
-    }
-  },
-  {
-    id: '2',
-    type: 'boost',
-    title: 'Signal boosted',
-    description: 'Your signal about Yeezy drop gained visibility',
-    timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 mins ago
-    metadata: {
-      lacesEarned: 25
-    }
-  },
-  {
-    id: '3',
-    type: 'join',
-    title: 'New drop zone member',
-    description: 'KicksCommunityNYC joined SoHo Sneaker Squad',
-    timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 mins ago
-    user: {
-      id: 'user2',
-      username: 'KicksCommunityNYC'
-    },
-    metadata: {
-      location: 'SoHo, Manhattan'
-    }
-  },
-  {
-    id: '4',
-    type: 'achievement',
-    title: 'Achievement unlocked',
-    description: 'Early Bird - First to spot 10 drops this month',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    metadata: {
-      lacesEarned: 100,
-      achievementLevel: 'Bronze'
-    }
-  }
-]
 
 const getActivityIcon = (type: ActivityItem['type']) => {
   switch (type) {
@@ -133,7 +74,7 @@ interface RecentActivityProps {
 }
 
 export const RecentActivity = ({ 
-  activities = mockActivities, 
+  activities = [], 
   maxItems = 5,
   showStats = true,
   className 
@@ -159,6 +100,9 @@ export const RecentActivity = ({
         </CardHeader>
         
         <CardContent className="space-y-4">
+          {displayActivities.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">No activity yet</p>
+          )}
           {displayActivities.map((activity, index) => {
             const ActivityIcon = getActivityIcon(activity.type)
             const colorClasses = getActivityColor(activity.type)
