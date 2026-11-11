@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { apiFetch } from './http';
 
 export interface LacesBalance {
   balance: number;
@@ -39,7 +39,7 @@ export interface Opportunities {
 
 export const LacesAPI = {
   async getBalance(): Promise<LacesBalance> {
-    const res = await fetch(`${API_BASE_URL}/v1/laces/balance`);
+    const res = await apiFetch(`/v1/laces/balance`);
     if (!res.ok) throw new Error('Failed to fetch balance');
     return res.json();
   },
@@ -50,19 +50,19 @@ export const LacesAPI = {
     if (params?.limit) query.append('limit', params.limit.toString());
     if (params?.transaction_type) query.append('transaction_type', params.transaction_type);
 
-    const res = await fetch(`${API_BASE_URL}/v1/laces/ledger?${query}`);
+    const res = await apiFetch(`/v1/laces/ledger?${query}`);
     if (!res.ok) throw new Error('Failed to fetch ledger');
     return res.json();
   },
 
   async getOpportunities(): Promise<Opportunities> {
-    const res = await fetch(`${API_BASE_URL}/v1/laces/opportunities`);
+    const res = await apiFetch(`/v1/laces/opportunities`);
     if (!res.ok) throw new Error('Failed to fetch opportunities');
     return res.json();
   },
 
   async claimStipend(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/v1/laces/daily-stipend`, {
+    const res = await apiFetch(`/v1/laces/daily-stipend`, {
       method: 'POST',
     });
     if (!res.ok) {
@@ -73,7 +73,7 @@ export const LacesAPI = {
   },
 
   async boostPost(postId: string, amount: number): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/v1/laces/boost-post/${postId}?boost_amount=${amount}`, {
+    const res = await apiFetch(`/v1/laces/boost-post/${postId}?boost_amount=${amount}`, {
       method: 'POST',
     });
     if (!res.ok) {

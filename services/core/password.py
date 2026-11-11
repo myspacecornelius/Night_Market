@@ -16,7 +16,7 @@ class PasswordPolicy:
     def validate(cls, password: str) -> Tuple[bool, str]:
         if len(password) < cls.min_length:
             return False, f"Password must be at least {cls.min_length} characters."
-        if cls.require_special and not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        if cls.require_special and not re.search(r"[^A-Za-z0-9]", password):
             return False, "Password must include a special character."
         if cls.require_number and not re.search(r"\d", password):
             return False, "Password must include a number."

@@ -3,7 +3,7 @@ import { z } from 'zod'
 // Common validation patterns
 const passwordSchema = z
   .string()
-  .min(8, 'Password must be at least 8 characters')
+  .min(12, 'Password must be at least 12 characters')
   .max(100, 'Password must be less than 100 characters')
   .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
   .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
@@ -114,7 +114,7 @@ export type ChangePasswordFormData = ChangePasswordFormDataType
 export const getPasswordStrength = (password: string) => {
   let score = 0
   const checks = {
-    length: password.length >= 8,
+    length: password.length >= 12,
     lowercase: /[a-z]/.test(password),
     uppercase: /[A-Z]/.test(password),
     number: /[0-9]/.test(password),

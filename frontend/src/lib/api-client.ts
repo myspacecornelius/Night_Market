@@ -1,11 +1,26 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import {
+  API_BASE_URL,
+  clearTokens,
+  endSession,
+  getAccessToken,
+  refreshAccessToken,
+  storeTokens,
+} from '@/lib/auth-tokens';
 
 export interface AuthTokens {
   access_token: string;
+  refresh_token?: string;
   token_type: string;
+}
+
+export interface RegisterData {
+  username: string;
+  email: string;
+  password: string;
+  display_name: string;
 }
 
 export interface User {
@@ -106,7 +121,6 @@ export interface DashboardTimeseriesPoint {
 
 class ApiClient {
   private client: AxiosInstance;
-  private authToken: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -118,20 +132,29 @@ class ApiClient {
 
     // Request interceptor for auth
     this.client.interceptors.request.use((config) => {
-      const token = this.getAuthToken();
+      const token = getAccessToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
     });
 
-    // Response interceptor for error handling
+    // Response interceptor: on 401 renew the session once and retry, otherwise end it
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          this.clearAuthToken();
-          window.location.href = '/login';
+      async (error) => {
+        const original = error.config;
+        const isAuthCall = typeof original?.url === 'string' && original.url.startsWith('/auth/token');
+        if (error.response?.status === 401 && original && !isAuthCall) {
+          if (!original._retried) {
+            original._retried = true;
+            const renewed = await refreshAccessToken();
+            if (renewed) {
+              original.headers.Authorization = `Bearer ${renewed}`;
+              return this.client(original);
+            }
+          }
+          endSession();
         }
         return Promise.reject(error);
       }
@@ -148,7 +171,12 @@ class ApiClient {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
 
-    this.setAuthToken(response.data.access_token);
+    storeTokens(response.data);
+    return response.data;
+  }
+
+  async register(data: RegisterData): Promise<User> {
+    const response = await this.client.post<User>('/auth/register', data);
     return response.data;
   }
 
@@ -284,26 +312,12 @@ class ApiClient {
     }
   }
 
-  // Token management
-  private setAuthToken(token: string) {
-    this.authToken = token;
-    localStorage.setItem('auth_token', token);
-  }
-
-  private getAuthToken(): string | null {
-    if (!this.authToken) {
-      this.authToken = localStorage.getItem('auth_token');
-    }
-    return this.authToken;
-  }
-
-  private clearAuthToken() {
-    this.authToken = null;
-    localStorage.removeItem('auth_token');
-  }
-
+  /** End the session on the server (best effort) and forget the tokens. */
   logout() {
-    this.clearAuthToken();
+    if (getAccessToken()) {
+      this.client.post('/auth/logout').catch(() => undefined);
+    }
+    clearTokens();
   }
 }
 

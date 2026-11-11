@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { apiFetch } from './http';
 
 export interface HeatmapCell {
   geohash: string;
@@ -28,13 +28,13 @@ export const HeatmapAPI = {
     if (params.zoom) query.append('zoom', params.zoom.toString());
     if (params.window) query.append('window', params.window);
 
-    const res = await fetch(`${API_BASE_URL}/v1/heatmap?${query}`);
+    const res = await apiFetch(`/v1/heatmap?${query}`);
     if (!res.ok) throw new Error('Failed to fetch heatmap data');
     return res.json();
   },
 
   async refreshCache(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/v1/heatmap/refresh`, {
+    const res = await apiFetch(`/v1/heatmap/refresh`, {
       method: 'POST',
     });
     if (!res.ok) throw new Error('Failed to refresh heatmap cache');

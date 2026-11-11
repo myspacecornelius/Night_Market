@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { apiFetch } from './http';
 
 export interface DropZone {
   id: string;
@@ -60,19 +60,19 @@ export const DropZonesAPI = {
     if (params?.limit) query.append('limit', params.limit.toString());
     if (params?.offset) query.append('offset', params.offset.toString());
 
-    const res = await fetch(`${API_BASE_URL}/v1/dropzones?${query}`);
+    const res = await apiFetch(`/v1/dropzones?${query}`);
     if (!res.ok) throw new Error('Failed to fetch dropzones');
     return res.json();
   },
 
   async get(id: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/v1/dropzones/${id}`);
+    const res = await apiFetch(`/v1/dropzones/${id}`);
     if (!res.ok) throw new Error('Failed to fetch dropzone');
     return res.json();
   },
 
   async create(data: CreateDropZoneRequest): Promise<DropZone> {
-    const res = await fetch(`${API_BASE_URL}/v1/dropzones`, {
+    const res = await apiFetch(`/v1/dropzones`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -85,7 +85,7 @@ export const DropZonesAPI = {
   },
 
   async checkIn(dropzoneId: string, data: CheckInRequest): Promise<CheckInResponse> {
-    const res = await fetch(`${API_BASE_URL}/v1/dropzones/${dropzoneId}/checkin`, {
+    const res = await apiFetch(`/v1/dropzones/${dropzoneId}/checkin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -98,7 +98,7 @@ export const DropZonesAPI = {
   },
 
   async join(dropzoneId: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/v1/dropzones/${dropzoneId}/join`, {
+    const res = await apiFetch(`/v1/dropzones/${dropzoneId}/join`, {
       method: 'POST',
     });
     if (!res.ok) {

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/auth-tokens'
 import type { User } from '@/lib/api-client'
 import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
 
@@ -24,20 +25,15 @@ interface AuthProviderProps {
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const queryClient = useQueryClient()
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-
-  // Check if user is logged in on app start
-  useEffect(() => {
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      setIsAuthenticated(true)
-    }
-  }, [])
+  // Read the stored token synchronously: starting as "signed out" and flipping in
+  // an effect sent every page reload to the login screen first.
+  const [isAuthenticated, setIsAuthenticated] = useState(() => getAccessToken() !== null)
 
   // Fetch current user data
   const { 
     data: user, 
     isLoading: userLoading,
+    isError: userFailed,
     refetch: refetchUser 
   } = useQuery({
     queryKey: ['currentUser'],
@@ -45,11 +41,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     enabled: isAuthenticated,
     retry: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
-    onError: () => {
-      // If fetching user fails, user is not authenticated
-      logout({ silent: true })
-    }
   })
+
+  // If fetching the user fails, the stored token is no good: sign out.
+  // (React Query v5 removed useQuery's onError, so this was never called before.)
+  useEffect(() => {
+    if (userFailed) {
+      apiClient.logout()
+      setIsAuthenticated(false)
+      queryClient.removeQueries({ queryKey: ['currentUser'] })
+    }
+  }, [userFailed, queryClient])
 
   // Login mutation
   const loginMutation = useMutation({
@@ -83,28 +85,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const registerMutation = useMutation({
     mutationFn: async (data: RegisterFormData) => {
       try {
-        // Note: This endpoint would need to be implemented in the backend
-        const response = await fetch('/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: data.username,
-            email: data.email,
-            password: data.password,
-            display_name: data.displayName
-          })
+        return await apiClient.register({
+          username: data.username,
+          email: data.email,
+          password: data.password,
+          display_name: data.displayName
         })
-        
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || 'Registration failed')
-        }
-        
-        return response.json()
       } catch (error: any) {
         if (error.response?.status === 409) {
           throw new Error('Username or email already exists')
-        } else if (error.response?.data?.detail) {
+        } else if (error.response?.status === 429) {
+          throw new Error('Too many sign-up attempts. Please try again later.')
+        } else if (typeof error.response?.data?.detail === 'string') {
           throw new Error(error.response.data.detail)
         } else {
           throw new Error('Registration failed. Please try again.')
