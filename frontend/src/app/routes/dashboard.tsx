@@ -7,8 +7,7 @@ import {
   MapPin, 
   Users, 
   Target,
-  Activity,
-  Eye
+  Activity
 } from 'lucide-react'
 import { 
   MetricsCard, 
@@ -44,7 +43,8 @@ const toActivityItem = (item: DashboardActivityItem): ActivityItem => ({
   timestamp: new Date(item.createdAt),
   user: { id: item.id, username: item.user.username, avatar: item.user.avatar ?? undefined },
   metadata: { signalType: item.postType },
-  stats: { views: item.views, comments: item.replies },
+  // Views and replies are not tracked by the API (they are always 0), so they are not shown.
+  stats: { boosts: item.boostScore },
 })
 
 export default function Dashboard() {
@@ -186,10 +186,10 @@ export default function Dashboard() {
         />
         
         <MetricsCard
-          title="Total Views"
-          value={metrics?.totalViews ?? '—'}
-          subtitle={metrics ? `Across your ${metrics.signalsPosted.toLocaleString()} signals` : undefined}
-          icon={Eye}
+          title="Your Activity"
+          value={metrics ? metrics.signalsPosted.toLocaleString() : '—'}
+          subtitle={metrics ? `Signals posted · ${metrics.checkIns.toLocaleString()} check-ins` : undefined}
+          icon={Activity}
           delay={0.3}
         />
       </div>

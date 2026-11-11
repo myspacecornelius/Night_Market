@@ -36,6 +36,7 @@ export interface ActivityItem {
     likes?: number
     comments?: number
     views?: number
+    boosts?: number
   }
 }
 
@@ -147,19 +148,26 @@ export const RecentActivity = ({
                       {/* Stats */}
                       {showStats && activity.stats && (
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          {activity.stats.likes && (
+                          {/* "> 0": a bare number before && renders as a stray "0" */}
+                          {(activity.stats.boosts ?? 0) > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Zap className="h-3 w-3" />
+                              {activity.stats.boosts}
+                            </span>
+                          )}
+                          {(activity.stats.likes ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <Heart className="h-3 w-3" />
                               {activity.stats.likes}
                             </span>
                           )}
-                          {activity.stats.comments && (
+                          {(activity.stats.comments ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <MessageCircle className="h-3 w-3" />
                               {activity.stats.comments}
                             </span>
                           )}
-                          {activity.stats.views && (
+                          {(activity.stats.views ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <Eye className="h-3 w-3" />
                               {activity.stats.views}
