@@ -6,13 +6,14 @@ ledger row in the same transaction. Nothing in this module commits: the caller
 owns the transaction, so a multi-step operation (a boost debits one user and
 credits another) is all-or-nothing.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
+from services.models.dropzone import DropZoneCheckIn
 from services.models.laces import LacesLedger
 from services.models.post import Post
 from services.models.user import User
@@ -107,6 +108,39 @@ def claim_daily_stipend(db: Session, user_id: UUID) -> LacesLedger:
     if stipend_claimed_today(db, user_id):
         raise LacesError("Daily stipend already claimed")
     return apply_laces(db, user_id, DAILY_STIPEND, "DAILY_STIPEND", description="Daily LACES stipend")
+
+
+def distribute_daily_stipends(db: Session, active_within_days: int = 7) -> int:
+    """Grant today's stipend to active users who posted or checked in recently and have not claimed it.
+
+    Each grant goes through claim_daily_stipend in its own savepoint, so one
+    failure does not undo the others. Returns how many users were credited.
+    Does not commit.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=active_within_days)
+    recent_posters = select(Post.user_id).where(Post.timestamp >= since)
+    recent_visitors = select(DropZoneCheckIn.user_id).where(DropZoneCheckIn.checked_in_at >= since)
+    claimed_today = select(LacesLedger.user_id).where(
+        LacesLedger.transaction_type == "DAILY_STIPEND",
+        LacesLedger.created_at >= start_of_utc_day(),
+    )
+    user_ids = db.scalars(
+        select(User.user_id).where(
+            User.is_active.is_(True),
+            or_(User.user_id.in_(recent_posters), User.user_id.in_(recent_visitors)),
+            User.user_id.not_in(claimed_today),
+        )
+    ).all()
+
+    granted = 0
+    for user_id in user_ids:
+        try:
+            with db.begin_nested():
+                claim_daily_stipend(db, user_id)
+            granted += 1
+        except LacesError:
+            continue  # claimed in the meantime
+    return granted
 
 
 def boost_post(db: Session, post_id: UUID, booster_id: UUID, amount: int = DEFAULT_BOOST_AMOUNT) -> dict:
