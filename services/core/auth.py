@@ -2,11 +2,11 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from services import models
@@ -23,6 +23,9 @@ REFRESH_REUSE_GRACE_SECONDS = 10
 # How precisely users.last_active_at is kept. Recording it on every request meant one
 # UPDATE and commit of the user's row per request.
 LAST_ACTIVE_RESOLUTION = timedelta(minutes=5)
+# Sessions are deleted this long after they expire. Until they expire, used-up
+# sessions are kept so that a replayed refresh token can be recognised.
+SESSION_RETENTION_DAYS = 30
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
@@ -270,14 +273,20 @@ def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):
     return len(sessions)
 
 def cleanup_expired_sessions(db: Session) -> int:
-    """Clean up expired sessions (run periodically)"""
-    expired_sessions = db.query(UserSession).filter(
-        UserSession.expires_at < datetime.now(timezone.utc),
-        UserSession.is_revoked == '0'
-    ).all()
-    
-    for session in expired_sessions:
-        session.revoke("expired")
-    
+    """Revoke sessions that have expired and delete the ones that expired long ago.
+
+    Returns how many were revoked. Run periodically (the worker does, hourly).
+    Every login and every token refresh adds a row holding an IP address and a
+    user agent; nothing used to delete any of them.
+    """
+    now = datetime.now(timezone.utc)
+    revoked = db.execute(
+        update(UserSession)
+        .where(UserSession.expires_at < now, UserSession.is_revoked == '0')
+        .values(is_revoked='1', revoked_reason='expired')
+    ).rowcount
+    db.execute(
+        delete(UserSession).where(UserSession.expires_at < now - timedelta(days=SESSION_RETENTION_DAYS))
+    )
     db.commit()
-    return len(expired_sessions)
+    return revoked

@@ -137,3 +137,38 @@ def test_activity_is_recorded_without_a_write_on_every_request(client, db_sessio
     assert client.get("/auth/me", headers=headers).status_code == 200
     db_session.refresh(user)
     assert user.last_active_at == first_seen  # recorded moments ago: no second write
+
+
+def test_old_sessions_are_deleted_and_expired_ones_revoked(db_session, make_user):
+    """Every login and every token refresh adds a row with an IP address and a user
+    agent. Nothing ever deleted one."""
+    from datetime import datetime, timedelta, timezone
+
+    from services.core.auth import SESSION_RETENTION_DAYS, cleanup_expired_sessions
+    from services.models.session import UserSession
+
+    user = make_user()
+    now = datetime.now(timezone.utc)
+
+    def session(name, expires_at, revoked="0"):
+        row = UserSession(
+            user_id=user.user_id, refresh_token_hash=UserSession.hash_refresh_token(name),
+            expires_at=expires_at, is_revoked=revoked,
+        )
+        db_session.add(row)
+        return row
+
+    live = session("live", now + timedelta(days=3))
+    just_expired = session("just-expired", now - timedelta(hours=1))
+    rotated_recently = session("rotated", now + timedelta(days=2), revoked="1")
+    long_gone = session("long-gone", now - timedelta(days=SESSION_RETENTION_DAYS + 1), revoked="1")
+    db_session.commit()
+    ids = {name: row.id for name, row in
+           (("live", live), ("just_expired", just_expired), ("rotated", rotated_recently), ("long_gone", long_gone))}
+
+    revoked = cleanup_expired_sessions(db_session)
+
+    assert revoked == 1  # the one that had expired but was still marked active
+    db_session.expire_all()
+    remaining = {row.id: row.is_revoked for row in db_session.query(UserSession).filter(UserSession.user_id == user.user_id)}
+    assert remaining == {ids["live"]: "0", ids["just_expired"]: "1", ids["rotated"]: "1"}  # long_gone is deleted
