@@ -1,89 +1,135 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, selectinload
 from typing import List, Optional
 from services.database import get_db
 from services.models.post import Post
 from services.schemas.post import PostCreate, Post as PostSchema
-from services.core.auth import get_current_active_user as get_current_user
+from services.core.auth import get_current_active_user as get_current_user, get_optional_user
 from services.models.user import User
 import uuid
 import json
+import logging
+
+import redis
+
 from services.core.redis_client import r
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+FEED_VERSION_KEY = "feed_version"
+
+
+def _feed_version() -> Optional[str]:
+    """Current cache generation, or None when Redis is unavailable (then nothing is cached)."""
+    try:
+        return r.get(FEED_VERSION_KEY) or "0"
+    except redis.RedisError as error:
+        logger.warning("Feed cache unavailable: %s", error)
+        return None
+
+
+def _invalidate_feeds() -> None:
+    """Start a new cache generation so every cached feed page is ignored from now on."""
+    try:
+        r.incr(FEED_VERSION_KEY)
+    except redis.RedisError as error:
+        logger.warning("Could not invalidate feed cache: %s", error)
+
+
+def _cached_feed(key: str, ttl: int, load) -> list:
+    """Serve a feed page from Redis, falling back to (and caching) the database result."""
+    version = _feed_version()
+    cache_key = f"{key}:v{version}" if version is not None else None
+    if cache_key:
+        try:
+            cached = r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except redis.RedisError as error:
+            logger.warning("Feed cache read failed: %s", error)
+
+    payload = [PostSchema.model_validate(post).model_dump(mode="json") for post in load()]
+
+    if cache_key:
+        try:
+            r.set(cache_key, json.dumps(payload), ex=ttl)
+        except redis.RedisError as error:
+            logger.warning("Feed cache write failed: %s", error)
+    return payload
+
+
 @router.post("/", response_model=PostSchema)
 def create_post(post: PostCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_post = Post(**post.model_dump(exclude={"geo_tag_lat", "geo_tag_long"}), user_id=current_user.user_id)
+    # geo tags only apply to hyperlocal signals; a plain post has no location
+    data = post.model_dump(exclude={"geo_tag_lat", "geo_tag_long"})
+    data["post_type"] = post.post_type.value
+    data["visibility"] = post.visibility.value
+    db_post = Post(**data, user_id=current_user.user_id)
     db.add(db_post)
     db.commit()
     db.refresh(db_post)
+    _invalidate_feeds()
     return db_post
 
 @router.get("/feed", response_model=List[PostSchema])
-def get_user_feed(skip: int = 0, limit: int = 20, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_user_feed(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get personalized feed for authenticated user.
     For now, returns global feed sorted by boost_score and recency.
     TODO: Implement social graph filtering when following/followers are added.
     """
-    cache_key = f"user_feed:{current_user.user_id}:{skip}:{limit}"
-    cached_posts = r.get(cache_key)
-    if cached_posts:
-        return json.loads(cached_posts)
+    def load():
+        return (
+            db.query(Post)
+            .options(selectinload(Post.location))
+            .filter(Post.visibility == 'public', Post.is_archived.is_(False))  # Respect privacy
+            .order_by(Post.boost_score.desc(), Post.timestamp.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-    # Get posts sorted by boost_score (engagement) and recency
-    posts = (
-        db.query(Post)
-        .filter(Post.visibility == 'public')  # Respect privacy
-        .order_by(Post.boost_score.desc(), Post.timestamp.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-
-    posts_dict = [{
-        "post_id": str(p.post_id),
-        "user_id": str(p.user_id),
-        "post_type": p.post_type,
-        "content_text": p.content_text,
-        "media_url": p.media_url,
-        "tags": p.tags,
-        "timestamp": p.timestamp.isoformat(),
-        "visibility": p.visibility,
-        "location_id": str(p.location_id) if p.location_id else None,
-        "boost_score": p.boost_score,
-    } for p in posts]
-    r.set(cache_key, json.dumps(posts_dict), ex=60)  # Cache for 60 seconds
-    return posts
+    return _cached_feed(f"user_feed:{current_user.user_id}:{skip}:{limit}", 60, load)
 
 @router.get("/global", response_model=List[PostSchema])
-def get_global_feed(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
-    cached_posts = r.get(f"global_feed:{skip}:{limit}")
-    if cached_posts:
-        return json.loads(cached_posts)
+def get_global_feed(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    def load():
+        return (
+            db.query(Post)
+            .options(selectinload(Post.location))
+            .filter(Post.visibility == 'public', Post.is_archived.is_(False))
+            .order_by(Post.timestamp.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
-    posts = db.query(Post).order_by(Post.timestamp.desc()).offset(skip).limit(limit).all()
-    # Naive caching: serialize selected fields compatible with current schema
-    posts_dict = [{
-        "post_id": str(p.post_id),
-        "user_id": str(p.user_id),
-        "post_type": p.post_type,
-        "content_text": p.content_text,
-        "media_url": p.media_url,
-        "tags": p.tags,
-        "timestamp": p.timestamp.isoformat(),
-        "visibility": p.visibility,
-        "location_id": str(p.location_id) if p.location_id else None,
-        "boost_score": p.boost_score,
-    } for p in posts]
-    r.set(f"global_feed:{skip}:{limit}", json.dumps(posts_dict), ex=30) # Cache for 30 seconds
-    return posts
+    return _cached_feed(f"global_feed:{skip}:{limit}", 30, load)
 
 @router.get("/user/{user_id}", response_model=List[PostSchema])
-def get_posts_by_user(user_id: uuid.UUID, db: Session = Depends(get_db)):
-    posts = db.query(Post).filter(Post.user_id == user_id).order_by(Post.timestamp.desc()).all()
-    return posts
+def get_posts_by_user(
+    user_id: uuid.UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    viewer: Optional[User] = Depends(get_optional_user),
+):
+    """A user's posts. Only the author sees their own non-public posts."""
+    query = db.query(Post).options(selectinload(Post.location)).filter(Post.user_id == user_id)
+    if viewer is None or viewer.user_id != user_id:
+        query = query.filter(Post.visibility == 'public', Post.is_archived.is_(False))
+    return query.order_by(Post.timestamp.desc()).offset(skip).limit(limit).all()
 
 @router.delete("/{post_id}", status_code=204)
 def delete_post(post_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -94,4 +140,5 @@ def delete_post(post_id: uuid.UUID, db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=403, detail="Not authorized to delete this post")
     db.delete(post)
     db.commit()
+    _invalidate_feeds()
     return

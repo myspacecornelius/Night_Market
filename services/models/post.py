@@ -1,4 +1,5 @@
 
+from geoalchemy2.shape import to_shape
 import uuid
 from sqlalchemy import Column, String, Enum, ForeignKey, DateTime, Integer, Text, Boolean, Index, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
@@ -33,6 +34,14 @@ class Post(Base):
     location = relationship("Location")
     laces_transactions = relationship("LacesLedger", back_populates="post")
     
+    @property
+    def geo_tag_lat(self):
+        return to_shape(self.location.point).y if self.location is not None else None
+
+    @property
+    def geo_tag_long(self):
+        return to_shape(self.location.point).x if self.location is not None else None
+
     # Constraints
     __table_args__ = (
         CheckConstraint('boost_score >= 0', name='positive_boost_score'),

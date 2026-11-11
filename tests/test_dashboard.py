@@ -64,8 +64,8 @@ def test_nearby_activity_counts_posts_within_the_radius(client, make_user, auth_
     headers = auth_headers(user)
     boston = {"content_text": "boston", "geo_tag_lat": 42.36, "geo_tag_long": -71.06}
     new_york = {"content_text": "nyc", "geo_tag_lat": 40.71, "geo_tag_long": -74.0}
-    assert client.post("/v1/signals", json=boston, headers=headers).status_code == 200
-    assert client.post("/v1/signals", json=new_york, headers=headers).status_code == 200
+    assert client.post("/v1/hyperlocal/signals", json=boston, headers=headers).status_code == 200
+    assert client.post("/v1/hyperlocal/signals", json=new_york, headers=headers).status_code == 200
 
     near_boston = client.get("/v1/dashboard/metrics?lat=42.361&lng=-71.061&radius_km=2", headers=headers).json()
     assert near_boston["activeSignals"] == 2

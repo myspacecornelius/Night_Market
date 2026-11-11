@@ -115,7 +115,7 @@ def test_signal_shows_up_in_heatmap(client, make_user, auth_headers):
     headers = auth_headers(user)
 
     signal = client.post(
-        "/v1/signals",
+        "/v1/hyperlocal/signals",
         json={"content_text": "restock on the wall", "geo_tag_lat": 42.36, "geo_tag_long": -71.06},
         headers=headers,
     )

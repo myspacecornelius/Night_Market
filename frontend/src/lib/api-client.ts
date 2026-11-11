@@ -188,7 +188,7 @@ class ApiClient {
 
   // Signal methods (hyperlocal)
   async createHyperlocalSignal(data: CreatePostData): Promise<Post> {
-    const response = await this.client.post<Post>('/v1/signals', data);
+    const response = await this.client.post<Post>('/v1/hyperlocal/signals', data);
     return response.data;
   }
 
@@ -204,7 +204,7 @@ class ApiClient {
   }
 
   async boostPost(postId: string): Promise<User> {
-    const response = await this.client.post<User>(`/v1/signals/${postId}/boost`);
+    const response = await this.client.post<User>(`/v1/hyperlocal/signals/${postId}/boost`);
     return response.data;
   }
 

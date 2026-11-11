@@ -18,6 +18,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
 class TokenPair:
     """Container for access and refresh token pair"""
@@ -125,6 +126,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     db.commit()
     
     return user
+
+def get_optional_user(
+    token: Optional[str] = Depends(optional_oauth2_scheme), db: Session = Depends(get_db)
+) -> Optional[models.User]:
+    """The caller if they sent a valid token for an active account, otherwise None."""
+    if not token:
+        return None
+    try:
+        payload = verify_access_token(token)
+    except HTTPException:
+        return None
+    user = db.query(models.User).filter(models.User.username == payload.get("sub")).first()
+    return user if user is not None and user.is_active else None
+
 
 def get_current_active_user(current_user: models.User = Depends(get_current_user)) -> models.User:
     """Get current active user (not banned/disabled)"""

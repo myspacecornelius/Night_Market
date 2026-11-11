@@ -1,10 +1,13 @@
-from sqlalchemy.orm import Session
-from geoalchemy2.elements import WKTElement
-from sqlalchemy import func, desc
-from typing import List
+from sqlalchemy.orm import Session, contains_eager
+from sqlalchemy import func, desc, or_
 
+from services.core.geospatial import geography_point
 from services.models import post as post_models
 from services.models import location as location_models
+
+# What a stranger standing nearby may see
+NEARBY_VISIBILITY = ('public', 'local')
+
 
 def get_hyperlocal_feed(
     db: Session,
@@ -13,25 +16,21 @@ def get_hyperlocal_feed(
     radius: float, # in kilometers
     limit: int = 100,
 ):
-    # Create a WKTElement for the user's current location
-    user_point = WKTElement(f'POINT({longitude} {latitude})', srid=4326)
+    """Posts within ``radius`` km, most boosted first, that a nearby stranger may see."""
+    Post = post_models.Post
+    Location = location_models.Location
 
-    # Convert radius from kilometers to meters for ST_DWithin
-    radius_meters = radius * 1000
-
-    # Query for posts within the specified radius of the user's location
-    # Order by boost_score (descending) and then by timestamp (descending)
-    posts = (
-        db.query(post_models.Post)
-        .join(location_models.Location, location_models.Location.id == post_models.Post.location_id)
+    return (
+        db.query(Post)
+        .join(Location, Location.id == Post.location_id)
+        .options(contains_eager(Post.location))
         .filter(
-            func.ST_DWithin(
-                location_models.Location.point, user_point, radius_meters
-            )
+            func.ST_DWithin(Location.point, geography_point(latitude, longitude), radius * 1000),
+            Post.visibility.in_(NEARBY_VISIBILITY),
+            Post.is_archived.is_(False),
+            or_(Post.expires_at.is_(None), Post.expires_at > func.now()),
         )
-        .order_by(desc(post_models.Post.boost_score), desc(post_models.Post.timestamp))
+        .order_by(desc(Post.boost_score), desc(Post.timestamp))
         .limit(limit)
         .all()
     )
-
-    return posts
