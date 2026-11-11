@@ -1,15 +1,24 @@
 
+import argparse
 import random
 import os
+import sys
+from typing import List, Optional
 from faker import Faker
 from sqlalchemy.orm import Session
-from services.core.database import SessionLocal
+from services.database import SessionLocal
 from services.models.user import User
 from services.models.post import Post
 from services.models.release import Release
 from services.models.location import Location
 from services.models.laces import LacesLedger
-from services.core.security import get_password_hash
+from services.models.like import Like
+from services.models.save import Save
+from services.models.subscription import Subscription
+from services.models.session import UserSession
+from services.models.signal import Signal
+from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn
+from services.core.security import DEVELOPMENT_ENVIRONMENTS, get_password_hash
 from services.core.locations import create_location_and_post
 from datetime import datetime, timedelta, timezone
 from services.schemas.post import PostCreate, PostType
@@ -82,28 +91,107 @@ SNEAKER_POSTS = [
     "Grail hunting at {location} - the {vibe} here never disappoints"
 ]
 
-def seed_data():
+# Everything the demo replaces, in deletion order: a table comes before the
+# tables it references, so clearing never trips a foreign key. Tables whose
+# foreign keys are ON DELETE CASCADE need no entry: their rows go with the user.
+WIPE_ORDER = (
+    Like, Save, Subscription,
+    DropZoneCheckIn, DropZoneMember, DropZone,
+    Signal, UserSession, LacesLedger,
+    Post, Location, User, Release,
+)
+
+
+class SeedRefused(RuntimeError):
+    """Seeding is not allowed here: it would delete existing data, or put demo
+    accounts into a database that is not a development one."""
+
+
+def _environment() -> str:
+    return os.getenv("ENVIRONMENT", "").strip().lower()
+
+
+def _is_development() -> bool:
+    """Whether ENVIRONMENT names a development environment.
+
+    The same rule as the rest of the application (services.core.security): an
+    unset, empty or unknown ENVIRONMENT is treated like production.
+    """
+    return _environment() in DEVELOPMENT_ENVIRONMENTS
+
+
+def _clear_or_refuse(db: Session, reset: bool, allow_production: bool) -> None:
+    """Delete the rows the demo replaces, or refuse and leave them untouched.
+
+    An empty development database needs no permission. Existing rows are
+    deleted only when the caller opted in, and never outside development.
+    Outside development even an empty database is only seeded on request: every
+    demo account has the same published password.
+    """
+    existing = {}
+    for model in WIPE_ORDER:
+        count = db.query(model).count()
+        if count:
+            existing[model.__tablename__] = count
+
+    found = ", ".join(f"{count} {table}" for table, count in existing.items())
+    if not _is_development():
+        environment = f"ENVIRONMENT is {_environment()!r}" if _environment() else "ENVIRONMENT is not set"
+        development = ", ".join(sorted(DEVELOPMENT_ENVIRONMENTS))
+        if existing:
+            raise SeedRefused(
+                f"Refusing to seed: {environment} and the database already holds data ({found}). "
+                f"The demo seed never deletes data outside development (ENVIRONMENT one of: {development})."
+            )
+        if not allow_production:
+            raise SeedRefused(
+                f"Refusing to seed: {environment}. Outside development (ENVIRONMENT one of: {development}) "
+                "the demo is only seeded on request, because its accounts all share a published password. "
+                "Run again with --allow-production (or SEED_ALLOW_PRODUCTION=true) if this database should "
+                "hold the demo data anyway."
+            )
+    if not existing:
+        return
+
+    if not reset:
+        raise SeedRefused(
+            f"Refusing to seed: the database already holds data ({found}) that seeding would delete. "
+            "Run again with --reset (or SEED_RESET=true) to delete it and reseed."
+        )
+
+    print(f"🧹 Clearing existing data ({found})...")
+    for model in WIPE_ORDER:
+        db.query(model).delete()
+    db.commit()
+
+
+def seed_data(reset: Optional[bool] = None, allow_production: Optional[bool] = None):
     """
     🌱 Seed Dharma with compelling sneaker community demo data
     Creates a vibrant underground network across major cities
+
+    Existing users, posts and everything that references them are only deleted
+    when ``reset`` is true (default: the SEED_RESET env var), and never outside
+    a development environment. There, an empty database is only seeded when
+    ``allow_production`` is true (default: the SEED_ALLOW_PRODUCTION env var).
+    Otherwise SeedRefused is raised and nothing is changed.
     """
     # Check if seeding is enabled
     if os.getenv("AUTO_SEED_DATA", "true").lower() != "true":
         print("🚫 Auto-seeding disabled via AUTO_SEED_DATA env var")
         return
 
+    if reset is None:
+        reset = os.getenv("SEED_RESET", "false").lower() == "true"
+    if allow_production is None:
+        allow_production = os.getenv("SEED_ALLOW_PRODUCTION", "false").lower() == "true"
+
     print("🌱 Seeding Dharma with sneaker community data...")
     db: Session = SessionLocal()
 
     try:
-        # Clear existing data for fresh demo
-        print("🧹 Clearing existing data...")
-        db.query(LacesLedger).delete()
-        db.query(Post).delete()
-        db.query(Location).delete()
-        db.query(User).delete()
-        db.query(Release).delete()
-        db.commit()
+        # Clear existing data for fresh demo (only when allowed to)
+        _clear_or_refuse(db, reset, allow_production)
 
         # Create city ambassadors - the faces of each scene
         print("👥 Creating city ambassadors...")
@@ -281,6 +369,9 @@ def seed_data():
         print(f"   🏙️  {len(CITY_LOCATIONS)} cities represented")
         print("🔥 The underground network is alive!")
         
+    except SeedRefused:
+        db.rollback()
+        raise
     except Exception as e:
         print(f"❌ Seeding failed: {e}")
         db.rollback()
@@ -288,5 +379,31 @@ def seed_data():
     finally:
         db.close()
 
+def main(argv: Optional[List[str]] = None) -> int:
+    """Command line entry point; returns the exit status."""
+    parser = argparse.ArgumentParser(description="Seed the database with demo data")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete existing users, posts and everything that references them first (development only)",
+    )
+    parser.add_argument(
+        "--allow-production",
+        action="store_true",
+        help="seed an empty database although ENVIRONMENT is not a development one "
+             "(the demo accounts share a published password)",
+    )
+    args = parser.parse_args(argv)
+    try:
+        seed_data(
+            reset=True if args.reset else None,
+            allow_production=True if args.allow_production else None,
+        )
+    except SeedRefused as refused:
+        print(f"🚫 {refused}", file=sys.stderr)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    seed_data()
+    sys.exit(main())

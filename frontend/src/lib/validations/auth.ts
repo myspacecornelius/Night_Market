@@ -3,8 +3,8 @@ import { z } from 'zod'
 // Common validation patterns
 const passwordSchema = z
   .string()
-  .min(8, 'Password must be at least 8 characters')
-  .max(100, 'Password must be less than 100 characters')
+  .min(12, 'Password must be at least 12 characters')
+  .max(72, 'Password must be at most 72 characters')
   .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
   .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
   .regex(/[0-9]/, 'Password must contain at least one number')
@@ -43,6 +43,22 @@ export const registerSchema = z.object({
   acceptTerms: z.boolean().refine(val => val === true, {
     message: 'You must accept the terms and conditions'
   })
+}).refine(data => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ['confirmPassword']
+})
+
+// Sign-up form: the fields the sign-up page asks for
+export const signUpSchema = z.object({
+  username: usernameSchema,
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Display name is required')
+    .max(50, 'Display name must be less than 50 characters'),
+  email: emailSchema,
+  password: passwordSchema,
+  confirmPassword: z.string().min(1, 'Please confirm your password'),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ['confirmPassword']
@@ -97,6 +113,7 @@ export const changePasswordSchema = z.object({
 // Infer types from schemas
 type LoginFormDataType = z.infer<typeof loginSchema>
 type RegisterFormDataType = z.infer<typeof registerSchema>
+type SignUpFormDataType = z.infer<typeof signUpSchema>
 type ForgotPasswordFormDataType = z.infer<typeof forgotPasswordSchema>
 type ResetPasswordFormDataType = z.infer<typeof resetPasswordSchema>
 type ProfileUpdateFormDataType = z.infer<typeof profileUpdateSchema>
@@ -105,6 +122,7 @@ type ChangePasswordFormDataType = z.infer<typeof changePasswordSchema>
 // Export types
 export type LoginFormData = LoginFormDataType
 export type RegisterFormData = RegisterFormDataType
+export type SignUpFormData = SignUpFormDataType
 export type ForgotPasswordFormData = ForgotPasswordFormDataType
 export type ResetPasswordFormData = ResetPasswordFormDataType
 export type ProfileUpdateFormData = ProfileUpdateFormDataType
@@ -114,7 +132,7 @@ export type ChangePasswordFormData = ChangePasswordFormDataType
 export const getPasswordStrength = (password: string) => {
   let score = 0
   const checks = {
-    length: password.length >= 8,
+    length: password.length >= 12,
     lowercase: /[a-z]/.test(password),
     uppercase: /[A-Z]/.test(password),
     number: /[0-9]/.test(password),

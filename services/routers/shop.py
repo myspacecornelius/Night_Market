@@ -1,7 +1,7 @@
 import uuid
 import json
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, UUID4
+from pydantic import BaseModel, Field, UUID4
 from sqlalchemy.orm import Session
 import redis.asyncio as redis
 
@@ -19,9 +19,9 @@ class CheckoutTaskPurchaseRequest(BaseModel):
     retailer: str
     mode: str  # 'request' or 'browser'
     profile_id: str
-    cost: int # Cost in LACES
+    cost: int = Field(gt=0)  # Cost in LACES
 
-from services.core.security import get_current_user
+from services.core.auth import get_current_active_user as get_current_user
 
 @router.post("/shop/purchase-checkout-task", status_code=202)
 async def purchase_checkout_task(

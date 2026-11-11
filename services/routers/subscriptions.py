@@ -5,8 +5,8 @@ from typing import List
 import uuid
 
 from services import models, schemas
-from services.core.database import get_db
-from services.core.security import get_current_user
+from services.database import get_db
+from services.core.auth import get_current_active_user as get_current_user
 
 router = APIRouter(
     prefix="/subscriptions",
@@ -15,7 +15,12 @@ router = APIRouter(
 
 @router.post("/", response_model=schemas.Subscription)
 def create_subscription(subscription: schemas.SubscriptionCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    db_subscription = models.Subscription(**subscription.dict(), user_id=current_user.user_id)
+    if subscription.release_id is not None:
+        # Checked here so an unknown release is a 404, not a foreign-key violation
+        release = db.query(models.Release.release_id).filter(models.Release.release_id == subscription.release_id).first()
+        if release is None:
+            raise HTTPException(status_code=404, detail="Release not found")
+    db_subscription = models.Subscription(**subscription.model_dump(), user_id=current_user.user_id)
     db.add(db_subscription)
     db.commit()
     db.refresh(db_subscription)

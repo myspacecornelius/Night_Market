@@ -3,15 +3,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/auth-tokens'
 import type { User } from '@/lib/api-client'
-import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
+import { type LoginFormData, type RegisterFormData } from '@/lib/validations/auth'
+
+/** What creating an account needs; the sign-up form collects more (the confirmation). */
+export type RegistrationDetails = Pick<RegisterFormData, 'username' | 'email' | 'password' | 'displayName'>
 
 export interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
   login: (data: LoginFormData) => Promise<void>
-  register: (data: RegisterFormData) => Promise<void>
+  register: (data: RegistrationDetails) => Promise<void>
   logout: (options?: { silent?: boolean }) => void
   refreshUser: () => Promise<void>
 }
@@ -22,34 +26,42 @@ interface AuthProviderProps {
   children: React.ReactNode
 }
 
+/** True when a request failed because the server no longer accepts the session. */
+const isUnauthorized = (error: unknown): boolean =>
+  (error as { response?: { status?: number } } | null)?.response?.status === 401
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const queryClient = useQueryClient()
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-
-  // Check if user is logged in on app start
-  useEffect(() => {
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      setIsAuthenticated(true)
-    }
-  }, [])
+  // Read the stored token synchronously: starting as "signed out" and flipping in
+  // an effect sent every page reload to the login screen first.
+  const [isAuthenticated, setIsAuthenticated] = useState(() => getAccessToken() !== null)
 
   // Fetch current user data
   const { 
     data: user, 
     isLoading: userLoading,
+    error: userError,
     refetch: refetchUser 
   } = useQuery({
     queryKey: ['currentUser'],
     queryFn: () => apiClient.getCurrentUser(),
     enabled: isAuthenticated,
-    retry: false,
+    // A 401 is final (the API client has already tried to renew the session).
+    // Anything else is the API restarting, a 5xx, a 429 or a dropped connection:
+    // worth another try, and never a reason to throw the session away.
+    retry: (failureCount, error) => !isUnauthorized(error) && failureCount < 3,
     staleTime: 5 * 60 * 1000, // 5 minutes
-    onError: () => {
-      // If fetching user fails, user is not authenticated
-      logout({ silent: true })
-    }
   })
+
+  // Only a 401 ends the session. Signing out on every failed profile request
+  // deleted both tokens whenever the API was briefly unreachable.
+  useEffect(() => {
+    if (isUnauthorized(userError)) {
+      apiClient.logout()
+      setIsAuthenticated(false)
+      queryClient.removeQueries({ queryKey: ['currentUser'] })
+    }
+  }, [userError, queryClient])
 
   // Login mutation
   const loginMutation = useMutation({
@@ -81,30 +93,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   // Register mutation
   const registerMutation = useMutation({
-    mutationFn: async (data: RegisterFormData) => {
+    mutationFn: async (data: RegistrationDetails) => {
       try {
-        // Note: This endpoint would need to be implemented in the backend
-        const response = await fetch('/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: data.username,
-            email: data.email,
-            password: data.password,
-            display_name: data.displayName
-          })
+        return await apiClient.register({
+          username: data.username,
+          email: data.email,
+          password: data.password,
+          display_name: data.displayName
         })
-        
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || 'Registration failed')
-        }
-        
-        return response.json()
       } catch (error: any) {
         if (error.response?.status === 409) {
-          throw new Error('Username or email already exists')
-        } else if (error.response?.data?.detail) {
+          // the API says which one is taken
+          const detail = error.response?.data?.detail
+          throw new Error(typeof detail === 'string' ? detail : 'Username or email already exists')
+        } else if (error.response?.status === 429) {
+          throw new Error('Too many sign-up attempts. Please try again later.')
+        } else if (typeof error.response?.data?.detail === 'string') {
           throw new Error(error.response.data.detail)
         } else {
           throw new Error('Registration failed. Please try again.')
@@ -112,7 +116,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     },
     onSuccess: () => {
-      toast.success('Account created successfully! Please log in.')
+      toast.success('Account created')
     },
     onError: (error: Error) => {
       toast.error(error.message)
@@ -123,7 +127,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await loginMutation.mutateAsync(data)
   }
 
-  const register = async (data: RegisterFormData) => {
+  const register = async (data: RegistrationDetails) => {
     await registerMutation.mutateAsync(data)
   }
 

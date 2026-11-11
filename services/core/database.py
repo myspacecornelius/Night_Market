@@ -1,20 +1,10 @@
+"""Compatibility shim.
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-import os
-from dotenv import load_dotenv
+The engine, session factory and ``get_db`` dependency live in
+``services.database``. This module used to build a second engine with its own
+connection pool, so a request could end up with the current user loaded in one
+session and the handler writing through another.
+"""
+from services.database import SessionLocal, engine, get_db
 
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/dbname")
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+__all__ = ["SessionLocal", "engine", "get_db"]

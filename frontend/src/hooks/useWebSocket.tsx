@@ -28,7 +28,7 @@ export const WebSocketProvider = ({
   children, 
   url = 'ws://localhost:8000/ws' 
 }: WebSocketProviderProps) => {
-  const { user, isAuthenticated } = useAuth()
+  const { isAuthenticated } = useAuth()
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)

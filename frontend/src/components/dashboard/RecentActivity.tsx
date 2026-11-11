@@ -1,4 +1,3 @@
-import React from 'react'
 import { motion } from 'framer-motion'
 import { formatDistanceToNow } from 'date-fns'
 import { 
@@ -9,8 +8,6 @@ import {
   Eye,
   Heart,
   MessageCircle,
-  Share,
-  MoreHorizontal
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -18,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 
-interface ActivityItem {
+export interface ActivityItem {
   id: string
   type: 'signal' | 'boost' | 'join' | 'like' | 'comment' | 'achievement'
   title: string
@@ -39,67 +36,9 @@ interface ActivityItem {
     likes?: number
     comments?: number
     views?: number
+    boosts?: number
   }
 }
-
-const mockActivities: ActivityItem[] = [
-  {
-    id: '1',
-    type: 'signal',
-    title: 'New sneaker spotted',
-    description: 'Jordan 4 "Black Cat" at Foot Locker Times Square',
-    timestamp: new Date(Date.now() - 1000 * 60 * 5), // 5 mins ago
-    user: {
-      id: 'user1',
-      username: 'SneakerHunter23',
-      avatar: 'https://github.com/shadcn.png'
-    },
-    metadata: {
-      location: 'Times Square, NYC',
-      signalType: 'SPOTTED'
-    },
-    stats: {
-      likes: 12,
-      comments: 3,
-      views: 45
-    }
-  },
-  {
-    id: '2',
-    type: 'boost',
-    title: 'Signal boosted',
-    description: 'Your signal about Yeezy drop gained visibility',
-    timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 mins ago
-    metadata: {
-      lacesEarned: 25
-    }
-  },
-  {
-    id: '3',
-    type: 'join',
-    title: 'New drop zone member',
-    description: 'KicksCommunityNYC joined SoHo Sneaker Squad',
-    timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 mins ago
-    user: {
-      id: 'user2',
-      username: 'KicksCommunityNYC'
-    },
-    metadata: {
-      location: 'SoHo, Manhattan'
-    }
-  },
-  {
-    id: '4',
-    type: 'achievement',
-    title: 'Achievement unlocked',
-    description: 'Early Bird - First to spot 10 drops this month',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    metadata: {
-      lacesEarned: 100,
-      achievementLevel: 'Bronze'
-    }
-  }
-]
 
 const getActivityIcon = (type: ActivityItem['type']) => {
   switch (type) {
@@ -133,7 +72,7 @@ interface RecentActivityProps {
 }
 
 export const RecentActivity = ({ 
-  activities = mockActivities, 
+  activities = [], 
   maxItems = 5,
   showStats = true,
   className 
@@ -159,6 +98,9 @@ export const RecentActivity = ({
         </CardHeader>
         
         <CardContent className="space-y-4">
+          {displayActivities.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">No activity yet</p>
+          )}
           {displayActivities.map((activity, index) => {
             const ActivityIcon = getActivityIcon(activity.type)
             const colorClasses = getActivityColor(activity.type)
@@ -206,19 +148,26 @@ export const RecentActivity = ({
                       {/* Stats */}
                       {showStats && activity.stats && (
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          {activity.stats.likes && (
+                          {/* "> 0": a bare number before && renders as a stray "0" */}
+                          {(activity.stats.boosts ?? 0) > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Zap className="h-3 w-3" />
+                              {activity.stats.boosts}
+                            </span>
+                          )}
+                          {(activity.stats.likes ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <Heart className="h-3 w-3" />
                               {activity.stats.likes}
                             </span>
                           )}
-                          {activity.stats.comments && (
+                          {(activity.stats.comments ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <MessageCircle className="h-3 w-3" />
                               {activity.stats.comments}
                             </span>
                           )}
-                          {activity.stats.views && (
+                          {(activity.stats.views ?? 0) > 0 && (
                             <span className="flex items-center gap-1">
                               <Eye className="h-3 w-3" />
                               {activity.stats.views}

@@ -7,9 +7,12 @@
     <title>Dharma</title>
   </head>
   <body>
-    <div id="root" style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;">
+    <!-- The centring belongs to the loading message, which React replaces. On #root it
+         outlived the message: the app was laid out as a centred flex item sized to its
+         content, so any wide page pushed the whole shell off a phone's screen. -->
+    <div id="root">
       <noscript>This app requires JavaScript to run.</noscript>
-      <div id="boot-fallback" style="color:#444;">Loading…</div>
+      <div id="boot-fallback" style="display:flex;align-items:center;justify-content:center;min-height:100vh;color:#444;font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;">Loading…</div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

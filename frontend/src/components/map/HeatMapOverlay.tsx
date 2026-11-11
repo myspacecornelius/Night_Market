@@ -1,184 +1,154 @@
-import * as React from "react"
-import { Rectangle, Popup, useMap } from "react-leaflet"
-import { LatLngBounds } from "leaflet"
-import { motion } from "framer-motion"
-import { Flame, Users, MapPin, Clock } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { MapBounds } from "./BaseMap"
-
-export interface HeatMapBin {
-  geohash: string
-  lat: number
-  lng: number
-  signal_count: number
-  post_count: number
-  boost_score: number
-  top_brands: Array<{ brand: string; count: number }>
-  top_tags: string[]
-  sample_posts: Array<{
-    post_id: string
-    content_text?: string
-    media_url?: string
-    timestamp: string
-    boost_score: number
-  }>
-}
-
-export interface HeatMapData {
-  bins: HeatMapBin[]
-  total_posts: number
-  time_window: string
-  bbox?: number[]
-}
+import { memo, useMemo } from "react"
+import { Rectangle, Popup } from "react-leaflet"
+import type { LatLngBoundsLiteral } from "leaflet"
+import { Flame, Users } from "lucide-react"
+import type { HeatmapBin } from "@/lib/api/heatmap"
 
 export interface HeatMapOverlayProps {
-  data?: HeatMapData
-  isLoading?: boolean
-  zoom: number
-  bounds: MapBounds
-  timeWindow?: "1h" | "24h" | "7d"
-  onTileClick?: (bin: HeatMapBin) => void
-  showLabels?: boolean
-  className?: string
+  bins: HeatmapBin[]
+  /** Post count of the busiest bin; tile colors are relative to it. */
+  maxPostCount: number
+  selectedGeohash?: string | null
+  onTileClick?: (bin: HeatmapBin) => void
 }
 
-// Calculate tile bounds from geohash center and zoom level
-function getGeohashBounds(lat: number, lng: number, zoom: number): LatLngBounds {
-  // Approximate tile size based on zoom level
-  const size = 0.01 * Math.pow(2, 12 - zoom)
-  return new LatLngBounds(
-    [lat - size, lng - size],
-    [lat + size, lng + size]
-  )
+/** Tile colors from the quietest to the busiest fifth of the scale. */
+export const HEAT_COLORS = [
+  "#65a30d", // lime-600
+  "#ca8a04", // yellow-600
+  "#d97706", // amber-600
+  "#ea580c", // orange-600
+  "#dc2626" // red-600
+] as const
+
+const HEAT_OPACITIES = [0.4, 0.5, 0.6, 0.7, 0.8] as const
+
+/** Index into HEAT_COLORS for a bin, relative to the busiest bin on the map. */
+export function heatLevel(postCount: number, maxPostCount: number): number {
+  if (maxPostCount <= 0) return 0
+  const share = postCount / maxPostCount
+  if (share > 0.8) return 4
+  if (share > 0.6) return 3
+  if (share > 0.4) return 2
+  if (share > 0.2) return 1
+  return 0
 }
 
-// Get intensity color based on activity score
-function getIntensityColor(signalCount: number, postCount: number, boostScore: number): string {
-  const totalActivity = signalCount + postCount + (boostScore / 10)
-  
-  if (totalActivity >= 50) return "#dc2626" // red-600 - Very high activity
-  if (totalActivity >= 25) return "#ea580c" // orange-600 - High activity  
-  if (totalActivity >= 10) return "#d97706" // amber-600 - Medium activity
-  if (totalActivity >= 5) return "#ca8a04" // yellow-600 - Low activity
-  if (totalActivity >= 1) return "#65a30d" // lime-600 - Minimal activity
-  return "#374151" // gray-700 - No activity
+const GEOHASH_ALPHABET = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+/**
+ * The exact cell a geohash names, as [[south, west], [north, east]].
+ * Returns null for a string that is not a geohash.
+ */
+export function geohashBounds(geohash: string): LatLngBoundsLiteral | null {
+  if (!geohash) return null
+
+  let south = -90
+  let north = 90
+  let west = -180
+  let east = 180
+  let isLongitude = true // bits alternate, starting with longitude
+
+  for (const character of geohash.toLowerCase()) {
+    const value = GEOHASH_ALPHABET.indexOf(character)
+    if (value === -1) return null
+
+    for (let bit = 4; bit >= 0; bit--) {
+      const upperHalf = ((value >> bit) & 1) === 1
+      if (isLongitude) {
+        const middle = (west + east) / 2
+        if (upperHalf) west = middle
+        else east = middle
+      } else {
+        const middle = (south + north) / 2
+        if (upperHalf) south = middle
+        else north = middle
+      }
+      isLongitude = !isLongitude
+    }
+  }
+
+  return [[south, west], [north, east]]
 }
 
-// Get opacity based on activity level
-function getIntensityOpacity(signalCount: number, postCount: number): number {
-  const totalActivity = signalCount + postCount
-  
-  if (totalActivity >= 50) return 0.8
-  if (totalActivity >= 25) return 0.7
-  if (totalActivity >= 10) return 0.6
-  if (totalActivity >= 5) return 0.5
-  if (totalActivity >= 1) return 0.4
-  return 0.2
-}
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
 
-// Individual heat map tile component
-function HeatTile({ 
-  bin, 
-  zoom, 
+// Individual heat map tile component. A result can hold thousands of bins, and Leaflet redraws
+// a rectangle whenever it is handed new bounds, style or handlers, so a tile only renders again
+// when something about it changed and keeps those three objects the same until then.
+const HeatTile = memo(function HeatTile({
+  bin,
+  maxPostCount,
+  selected,
   onTileClick,
-  showLabels = false 
-}: { 
-  bin: HeatMapBin
-  zoom: number
-  onTileClick?: (bin: HeatMapBin) => void
-  showLabels?: boolean
+}: {
+  bin: HeatmapBin
+  maxPostCount: number
+  selected: boolean
+  onTileClick?: (bin: HeatmapBin) => void
 }) {
-  const bounds = getGeohashBounds(bin.lat, bin.lng, zoom)
-  const color = getIntensityColor(bin.signal_count, bin.post_count, bin.boost_score)
-  const opacity = getIntensityOpacity(bin.signal_count, bin.post_count)
-  
-  const totalActivity = bin.signal_count + bin.post_count
-  
-  if (totalActivity === 0) return null // Don't render empty tiles
+  const bounds = useMemo(() => geohashBounds(bin.geohash), [bin.geohash])
+
+  const level = heatLevel(bin.post_count, maxPostCount)
+  const color = HEAT_COLORS[level]
+
+  const pathOptions = useMemo(
+    () => ({
+      fillColor: color,
+      fillOpacity: HEAT_OPACITIES[level],
+      color: selected ? "#fafaf9" : color,
+      weight: selected ? 3 : 1,
+      opacity: selected ? 1 : 0.8
+    }),
+    [color, level, selected]
+  )
+
+  const eventHandlers = useMemo(
+    () => ({ click: () => onTileClick?.(bin) }),
+    [bin, onTileClick]
+  )
+
+  if (!bounds) return null
 
   return (
     <Rectangle
       bounds={bounds}
-      pathOptions={{
-        fillColor: color,
-        fillOpacity: opacity,
-        color: color,
-        weight: 1,
-        opacity: 0.8
-      }}
-      eventHandlers={{
-        click: () => onTileClick?.(bin)
-      }}
+      pathOptions={pathOptions}
+      eventHandlers={eventHandlers}
     >
       <Popup className="heat-tile-popup">
-        <div className="p-3 min-w-64">
+        <div className="p-3 min-w-56">
           {/* Header */}
           <div className="flex items-center gap-2 mb-3">
-            <div 
-              className="w-4 h-4 rounded-full" 
+            <div
+              className="w-4 h-4 rounded-full"
               style={{ backgroundColor: color }}
             />
             <span className="font-semibold text-stone-100">
-              Activity Hotspot
+              Activity hotspot
             </span>
+            <span className="font-mono text-xs text-stone-400">{bin.geohash}</span>
           </div>
-          
+
           {/* Stats */}
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2">
-              <MapPin size={16} className="text-amber-400" />
-              <div>
-                <div className="text-xs text-stone-400">Signals</div>
-                <div className="font-semibold text-stone-100">{bin.signal_count}</div>
-              </div>
+              <Users size={16} className="text-green-400" aria-hidden="true" />
+              <div className="font-semibold text-stone-100">{plural(bin.post_count, "post")}</div>
             </div>
             <div className="flex items-center gap-2">
-              <Users size={16} className="text-green-400" />
-              <div>
-                <div className="text-xs text-stone-400">Posts</div>
-                <div className="font-semibold text-stone-100">{bin.post_count}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Flame size={16} className="text-orange-400" />
-              <div>
-                <div className="text-xs text-stone-400">Heat Score</div>
-                <div className="font-semibold text-stone-100">{bin.boost_score}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock size={16} className="text-blue-400" />
-              <div>
-                <div className="text-xs text-stone-400">Total</div>
-                <div className="font-semibold text-stone-100">{totalActivity}</div>
-              </div>
+              <Flame size={16} className="text-orange-400" aria-hidden="true" />
+              <div className="font-semibold text-stone-100">{bin.boost_score} boost</div>
             </div>
           </div>
-          
-          {/* Top Brands */}
-          {bin.top_brands && bin.top_brands.length > 0 && (
-            <div className="mb-3">
-              <div className="text-xs text-stone-400 mb-1">Top Brands</div>
-              <div className="flex flex-wrap gap-1">
-                {bin.top_brands.slice(0, 3).map((brand) => (
-                  <span 
-                    key={brand.brand}
-                    className="text-xs bg-amber-900/30 text-amber-200 px-2 py-1 rounded"
-                  >
-                    {brand.brand} ({brand.count})
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          
+
           {/* Top Tags */}
-          {bin.top_tags && bin.top_tags.length > 0 && (
-            <div className="mb-3">
-              <div className="text-xs text-stone-400 mb-1">Popular Tags</div>
+          {bin.top_tags.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs text-stone-400 mb-1">Popular tags</div>
               <div className="flex flex-wrap gap-1">
-                {bin.top_tags.slice(0, 4).map((tag) => (
-                  <span 
+                {bin.top_tags.map((tag) => (
+                  <span
                     key={tag}
                     className="text-xs bg-green-900/30 text-green-200 px-2 py-1 rounded"
                   >
@@ -188,108 +158,30 @@ function HeatTile({
               </div>
             </div>
           )}
-          
-          {/* Sample Posts */}
-          {bin.sample_posts && bin.sample_posts.length > 0 && (
-            <div>
-              <div className="text-xs text-stone-400 mb-2">Recent Activity</div>
-              <div className="space-y-2">
-                {bin.sample_posts.slice(0, 2).map((post) => (
-                  <div 
-                    key={post.post_id}
-                    className="text-xs bg-stone-800/50 p-2 rounded border-l-2 border-amber-500"
-                  >
-                    {post.content_text && (
-                      <div className="text-stone-200 mb-1">
-                        {post.content_text}
-                      </div>
-                    )}
-                    <div className="text-stone-400">
-                      {new Date(post.timestamp).toLocaleString()} • {post.boost_score} boost
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </Popup>
     </Rectangle>
   )
-}
+})
 
+/** One rectangle per geohash bin, drawn over the exact cell the bin covers. */
 export function HeatMapOverlay({
-  data,
-  isLoading = false,
-  zoom,
-  bounds,
-  timeWindow = "24h",
-  onTileClick,
-  showLabels = false,
-  className
+  bins,
+  maxPostCount,
+  selectedGeohash,
+  onTileClick
 }: HeatMapOverlayProps) {
-  if (isLoading) {
-    return (
-      <div className={cn("absolute inset-0 z-10 flex items-center justify-center", className)}>
-        <motion.div
-          className="bg-black/50 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-        >
-          <div className="animate-spin rounded-full h-4 w-4 border-2 border-amber-400 border-t-transparent" />
-          <span className="text-sm">Loading heat map...</span>
-        </motion.div>
-      </div>
-    )
-  }
-
-  if (!data || !data.bins || data.bins.length === 0) {
-    return null
-  }
-
   return (
     <>
-      {/* Render heat map tiles */}
-      {data.bins.map((bin) => (
+      {bins.map((bin) => (
         <HeatTile
           key={bin.geohash}
           bin={bin}
-          zoom={zoom}
+          maxPostCount={maxPostCount}
+          selected={bin.geohash === selectedGeohash}
           onTileClick={onTileClick}
-          showLabels={showLabels}
         />
       ))}
-      
-      {/* Heat map legend */}
-      <div className="absolute bottom-20 left-4 z-10 bg-black/80 text-white p-3 rounded-lg text-xs">
-        <div className="font-semibold mb-2">Activity Heat Map</div>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-600" />
-            <span>Very High (50+)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-orange-600" />
-            <span>High (25+)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-amber-600" />
-            <span>Medium (10+)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-yellow-600" />
-            <span>Low (5+)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-lime-600" />
-            <span>Minimal (1+)</span>
-          </div>
-        </div>
-        <div className="mt-2 pt-2 border-t border-stone-600">
-          <span className="text-stone-400">Window: {timeWindow}</span>
-        </div>
-      </div>
     </>
   )
 }

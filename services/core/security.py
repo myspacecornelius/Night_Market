@@ -1,86 +1,57 @@
+"""JWT settings and password hashing.
 
+Token creation and the ``get_current_*`` dependencies live in
+``services.core.auth``.
+"""
 import logging
 import os
-from datetime import datetime, timedelta
-from typing import Optional
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from passlib.context import CryptContext
-
-from services import models, schemas
-from services.core.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SECRET = "development-only-key-change-in-production"
+# Secrets anyone can read in this repository. They sign tokens only in development and tests.
+PUBLIC_SECRETS = frozenset({
+    DEFAULT_SECRET,
+    "dharma_jwt_secret_key_change_in_production_use_openssl_rand_hex_32",  # .env.example
+})
+DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "dev", "local", "test", "testing", "ci"})
+
+ENVIRONMENT = os.getenv("ENVIRONMENT", "").strip().lower()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", DEFAULT_SECRET)
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
-if SECRET_KEY == DEFAULT_SECRET and os.getenv("ENVIRONMENT") == "production":
-    raise ValueError("JWT_SECRET_KEY must be set in production environment")
+# Fail closed: anything that is not explicitly a development environment (including
+# an unset or misspelled ENVIRONMENT) needs a private secret, because a token signed
+# with a published secret is accepted as any user, admins included.
+if SECRET_KEY in PUBLIC_SECRETS and ENVIRONMENT not in DEVELOPMENT_ENVIRONMENTS:
+    raise ValueError(
+        "JWT_SECRET_KEY is unset or is a published example value. Set a private secret "
+        "(for example: openssl rand -hex 32), or set ENVIRONMENT=development for local work."
+    )
 
 if len(SECRET_KEY) < 32:
     raise ValueError("JWT_SECRET_KEY must be at least 32 characters for HMAC signatures.")
 
-if SECRET_KEY == DEFAULT_SECRET:
-    logger.warning("Using development JWT secret – do not use this configuration in production.")
+if SECRET_KEY in PUBLIC_SECRETS:
+    logger.warning("Using a published development JWT secret – never deploy this configuration.")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+# bcrypt hash of a throwaway string: login verifies against it when the account does
+# not exist, so an unknown user takes as long to reject as a wrong password.
+DUMMY_PASSWORD_HASH = "$2b$12$3.l6c/tCW4Jby5S2te4h5O345soL8ChrAXeOBrJQ7JNu2wJ2fZbHS"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except ValueError:
+        # passlib refuses passwords with NUL bytes or over 4096 characters; no stored
+        # hash can match those, so they are simply wrong passwords, not server errors.
+        return False
+
 
 def get_password_hash(password):
     return pwd_context.hash(password)
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = schemas.TokenData(username=username)
-    except JWTError:
-        raise credentials_exception
-    db = SessionLocal()
-    user = db.query(models.User).filter(models.User.username == token_data.username).first()
-    db.close()
-    if user is None:
-        raise credentials_exception
-    return user
-
-def get_current_admin_user(current_user: models.User = Depends(get_current_user)):
-    # Check if user has admin role or is in admin list from environment
-    admin_users = os.getenv("ADMIN_USERS", "").split(",")
-    if current_user.username not in admin_users and not hasattr(current_user, 'is_admin'):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Insufficient privileges"
-        )
-    return current_user
-
-def validate_token_strength(token: str) -> bool:
-    """Validate JWT token structure and strength"""
-    if not token or len(token) < 10:
-        return False
-    return True

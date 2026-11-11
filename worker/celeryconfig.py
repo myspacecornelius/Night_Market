@@ -3,7 +3,8 @@ Celery configuration for Night Market / Dharma
 """
 
 import os
-from kombu import Exchange, Queue
+
+from celery.schedules import crontab
 
 # Broker settings
 broker_url = os.getenv('REDIS_URL', 'redis://redis:6379/0')
@@ -33,15 +34,28 @@ worker_enable_remote_control = True
 worker_send_task_events = True
 task_send_sent_event = True
 
-# Beat schedule for periodic tasks
+# Beat schedule for periodic tasks. This is the only place schedules are defined:
+# worker/tasks.py used to register the same jobs again, so each ran twice.
 beat_schedule = {
     'refresh-heatmap-cache': {
         'task': 'worker.tasks.refresh_heatmap_cache',
         'schedule': 300.0,  # Every 5 minutes
     },
+    'manage-dropzone-windows': {
+        'task': 'worker.tasks.manage_dropzone_windows',
+        'schedule': 60.0,  # Every minute
+    },
     'daily-laces-stipend': {
         'task': 'worker.tasks.daily_laces_stipend',
-        'schedule': 86400.0,  # Daily
+        'schedule': crontab(hour=0, minute=5),  # Just after the UTC day starts
+    },
+    'cleanup-expired-sessions': {
+        'task': 'worker.tasks.cleanup_expired_sessions',
+        'schedule': crontab(minute=17),  # Hourly
+    },
+    'daily-cleanup': {
+        'task': 'worker.tasks.cleanup_old_data',
+        'schedule': crontab(hour=3, minute=0),
     },
     'process-checkout-results': {
         'task': 'worker.tasks.process_checkout_results',

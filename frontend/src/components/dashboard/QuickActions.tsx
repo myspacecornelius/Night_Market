@@ -6,13 +6,10 @@ import {
   MapPin, 
   Search, 
   Zap, 
-  Camera, 
   Users,
   TrendingUp,
-  Bell
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/cn'
 
@@ -34,7 +31,7 @@ const defaultActions: QuickAction[] = [
     title: 'Create Signal',
     description: 'Share a sneaker spotting or intel',
     icon: Plus,
-    href: '/signals/create',
+    href: '/feed',
     variant: 'primary'
   },
   {
@@ -62,17 +59,17 @@ const defaultActions: QuickAction[] = [
   {
     id: 'boost-signal',
     title: 'Boost Signal',
-    description: 'Spend LACES to amplify a post',
+    description: 'Spend LACES to amplify a post in the feed',
     icon: Zap,
-    variant: 'warning',
-    onClick: () => console.log('Boost modal')
+    href: '/feed',
+    variant: 'warning'
   },
   {
-    id: 'camera-scan',
-    title: 'Scan Sneaker',
-    description: 'Identify sneakers with AI',
-    icon: Camera,
-    onClick: () => console.log('Camera modal')
+    id: 'daily-quests',
+    title: 'Daily Quests',
+    description: 'Earn LACES for what you already do',
+    icon: TrendingUp,
+    href: '/quests'
   }
 ]
 

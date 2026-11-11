@@ -1,10 +1,10 @@
-import { ReactElement, ReactNode } from 'react'
-import { render, RenderOptions } from '@testing-library/react'
+import { type ReactElement, type ReactNode } from 'react'
+import { render, type RenderOptions } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { AuthContextType, MockAuthProvider } from '@/hooks/useAuth'
-import { WebSocketContext, WebSocketContextType } from '@/lib/websocket'
+import { type AuthContextType, MockAuthProvider } from '@/hooks/useAuth'
+import { WebSocketContext, type WebSocketContextType } from '@/lib/websocket'
 
 type ProvidersOptions = {
   route?: string

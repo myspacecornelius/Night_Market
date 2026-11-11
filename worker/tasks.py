@@ -16,14 +16,16 @@ import os
 
 # Initialize Celery
 app = Celery('dharma')
-app.config_from_object('celeryconfig')
+# Package-qualified so it resolves wherever the repository root is on the path
+# (the API process imports this module too, without worker/ on its path).
+app.config_from_object('worker.celeryconfig')
 
 # Get logger
 logger = get_task_logger(__name__)
 
 # Redis client for direct access
 redis_client = redis.StrictRedis.from_url(
-    'redis://redis:6379/0',
+    os.getenv('REDIS_URL', 'redis://redis:6379/0'),
     decode_responses=True
 )
 
@@ -325,7 +327,7 @@ def refresh_heatmap_cache(self, zones: Optional[list] = None) -> Dict[str, Any]:
             key_patterns = [f"{base}:*" for base in base_patterns]
 
         for pattern in key_patterns:
-            keys = redis_client.keys(pattern)
+            keys = list(redis_client.scan_iter(pattern))  # SCAN: KEYS blocks Redis on a large keyspace
             if keys:
                 redis_client.delete(*keys)
                 cache_keys_cleared += len(keys)
@@ -401,87 +403,22 @@ def process_new_post(post_data: Dict[str, Any]) -> Dict[str, Any]:
 @app.task
 def daily_laces_stipend() -> Dict[str, Any]:
     """
-    Distribute daily LACES stipend to active users who haven't claimed it
+    Distribute the daily LACES stipend to active users who haven't claimed it
     """
+    from services.core import laces
+    from services.database import session_scope
+
     try:
-        from sqlalchemy import create_engine, func, and_
-        from sqlalchemy.orm import sessionmaker
-        from services.models.user import User
-        from services.models.laces import LacesLedger
-        from services.models.post import Post
-        from services.models.dropzone import DropZoneCheckIn
-        
-        # Get database connection
-        database_url = os.getenv("DATABASE_URL")
-        engine = create_engine(database_url)
-        Session = sessionmaker(bind=engine)
-        
-        with Session() as db:
-            logger.info("Starting daily LACES stipend distribution")
-            
-            today = datetime.now().date()
-            seven_days_ago = datetime.now() - timedelta(days=7)
-            
-            # Query active users (posted or checked-in in last 7 days)
-            # who haven't claimed today's stipend yet
-            users_with_recent_activity = db.query(User.user_id).filter(
-                User.user_id.in_(
-                    # Users with recent posts
-                    db.query(Post.user_id).filter(Post.timestamp >= seven_days_ago).union(
-                        # Users with recent check-ins
-                        db.query(DropZoneCheckIn.user_id).filter(DropZoneCheckIn.checked_in_at >= seven_days_ago)
-                    )
-                )
-            ).subquery()
-            
-            # Find users who haven't claimed stipend today
-            users_without_stipend = db.query(User).filter(
-                and_(
-                    User.user_id.in_(users_with_recent_activity),
-                    ~db.query(LacesLedger).filter(
-                        and_(
-                            LacesLedger.user_id == User.user_id,
-                            LacesLedger.transaction_type == 'DAILY_STIPEND',
-                            func.date(LacesLedger.created_at) == today
-                        )
-                    ).exists()
-                )
-            ).all()
-            
-            stipends_distributed = 0
-            daily_stipend_amount = 100
-            
-            for user in users_without_stipend:
-                try:
-                    # Create ledger entry
-                    ledger_entry = LacesLedger(
-                        user_id=user.user_id,
-                        amount=daily_stipend_amount,
-                        transaction_type='DAILY_STIPEND'
-                    )
-                    db.add(ledger_entry)
-                    
-                    # Update user balance
-                    user.laces_balance += daily_stipend_amount
-                    
-                    stipends_distributed += 1
-                    
-                except Exception as e:
-                    logger.error(f"Failed to distribute stipend to user {user.user_id}: {e}")
-                    continue
-            
-            # Commit all changes
-            db.commit()
-            
-            logger.info(f"Distributed daily stipend to {stipends_distributed} users")
-            
-            return {
-                'stipends_distributed': stipends_distributed,
-                'amount_per_user': daily_stipend_amount,
-                'total_distributed': stipends_distributed * daily_stipend_amount,
-                'distributed_at': datetime.now().isoformat()
-            }
-            
+        with session_scope() as db:
+            stipends_distributed = laces.distribute_daily_stipends(db)
+
+        logger.info(f"Distributed daily stipend to {stipends_distributed} users")
+        return {
+            'stipends_distributed': stipends_distributed,
+            'amount_per_user': laces.DAILY_STIPEND,
+            'total_distributed': stipends_distributed * laces.DAILY_STIPEND,
+            'distributed_at': datetime.now().isoformat()
+        }
     except Exception as e:
         logger.error(f"Daily stipend failed: {e}")
         raise
@@ -489,27 +426,36 @@ def daily_laces_stipend() -> Dict[str, Any]:
 @app.task
 def manage_dropzone_windows() -> Dict[str, Any]:
     """
-    Open/close dropzone windows based on schedule
+    Open scheduled dropzones whose start time has passed and end those past their end time
     """
+    from services.core.dropzones import sync_dropzone_statuses
+    from services.database import session_scope
+
     try:
-        logger.info("Managing dropzone windows")
-        
-        # TODO: Query dropzones with scheduled windows
-        # TODO: Open zones that should be active now
-        # TODO: Close zones past their end time
-        # TODO: Send notifications for zone status changes
-        
-        zones_opened = 0
-        zones_closed = 0
-        
-        return {
-            'zones_opened': zones_opened,
-            'zones_closed': zones_closed,
-            'managed_at': datetime.now().isoformat()
-        }
-        
+        with session_scope() as db:
+            result = sync_dropzone_statuses(db)
+
+        if result['zones_opened'] or result['zones_closed']:
+            logger.info(f"Dropzones opened: {result['zones_opened']}, closed: {result['zones_closed']}")
+        return {**result, 'managed_at': datetime.now().isoformat()}
     except Exception as e:
         logger.error(f"Dropzone management failed: {e}")
+        raise
+
+@app.task
+def cleanup_expired_sessions() -> Dict[str, Any]:
+    """
+    Revoke login sessions whose refresh token has expired
+    """
+    from services.core.auth import cleanup_expired_sessions as revoke_expired
+    from services.database import session_scope
+
+    try:
+        with session_scope() as db:
+            revoked = revoke_expired(db)
+        return {'sessions_revoked': revoked, 'cleaned_at': datetime.now().isoformat()}
+    except Exception as e:
+        logger.error(f"Session cleanup failed: {e}")
         raise
 
 @app.task(base=CallbackTask, bind=True)
@@ -554,45 +500,7 @@ def process_checkout_results(self):
         logger.error(f"Checkout result processing failed: {e}")
         self.retry(exc=e, countdown=10)
 
-# Scheduled tasks
-@app.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    """Configure periodic tasks"""
-    
-    # Process checkout results every second
-    sender.add_periodic_task(
-        1.0,
-        process_checkout_results.s(),
-        name='Process checkout results'
-    )
-
-    # Refresh heatmap cache every 5 minutes
-    sender.add_periodic_task(
-        300.0,
-        refresh_heatmap_cache.s(),
-        name='Refresh heatmap cache'
-    )
-    
-    # Daily LACES stipend at midnight UTC
-    sender.add_periodic_task(
-        86400.0,
-        daily_laces_stipend.s(),
-        name='Daily LACES stipend'
-    )
-    
-    # Manage dropzone windows every minute
-    sender.add_periodic_task(
-        60.0,
-        manage_dropzone_windows.s(),
-        name='Manage dropzone windows'
-    )
-    
-    # Clean up old data daily
-    sender.add_periodic_task(
-        86400.0,
-        cleanup_old_data.s(),
-        name='Daily cleanup'
-    )
+# Periodic tasks are scheduled in worker/celeryconfig.py (beat_schedule).
 
 # WebSocket task for real-time updates
 @app.task

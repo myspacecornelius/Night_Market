@@ -92,7 +92,7 @@ def generate_heatmap_tiles(self, precision: int = 7, time_window: str = "24h", f
             geohash = geohash2.encode(coords.lat, coords.lng, precision)
             
             if geohash not in tile_data:
-                center = geohash2.decode(geohash)
+                center = geohash2.decode_exactly(geohash)
                 tile_data[geohash] = {
                     "geohash": geohash,
                     "center_lat": center[0],
@@ -128,7 +128,7 @@ def generate_heatmap_tiles(self, precision: int = 7, time_window: str = "24h", f
             geohash = geohash2.encode(coords.lat, coords.lng, precision)
             
             if geohash not in tile_data:
-                center = geohash2.decode(geohash)
+                center = geohash2.decode_exactly(geohash)
                 tile_data[geohash] = {
                     "geohash": geohash,
                     "center_lat": center[0],

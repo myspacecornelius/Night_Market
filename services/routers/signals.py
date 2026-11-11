@@ -1,15 +1,17 @@
 """
 Signals API - Enhanced geospatial signals for the sneaker community
 """
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, List, Literal, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, desc
-from pydantic import BaseModel, validator
+from sqlalchemy import and_, func, desc, or_
+from pydantic import BaseModel, Field, validator
 
 from services.core.cache import CacheStrategy
+from services.core.geospatial import BBox, parse_bbox, point_lat, point_lng, within_bbox
 from services.database import get_db
 from services.core.auth import get_current_active_user
 from services.core.redis_client import get_redis
@@ -20,19 +22,62 @@ from worker.processors.signal_processing import refresh_heatmap_cache
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
+# Query filters are typed so that an unknown value is a 422, not a database error
+SignalTypeName = Literal[
+    'SPOTTED', 'STOCK_CHECK', 'LINE_UPDATE', 'INTEL_REPORT', 'HEAT_CHECK', 'DROP_ALERT', 'GENERAL'
+]
+TimeWindow = Literal["1h", "24h", "7d"]
+
+# Simple city filtering - in production, use proper geocoding.
+# Boxes are (min_lng, min_lat, max_lng, max_lat), the order parse_bbox returns.
+CITY_BOUNDS: Dict[str, BBox] = {
+    "boston": (-71.2, 42.3, -71.0, 42.4),
+    "nyc": (-74.1, 40.6, -73.9, 40.8),
+    "la": (-118.3, 33.9, -118.1, 34.1),
+    "chicago": (-87.8, 41.8, -87.6, 42.0),
+}
+
+# PostgreSQL text cannot hold a NUL character: reject it here, not in the driver
+NO_NUL = r"^[^\x00]*$"
+Tag = Annotated[str, Field(min_length=1, max_length=50, pattern=NO_NUL)]
+
+# Keeps OFFSET = (page - 1) * per_page far inside PostgreSQL's bigint range
+MAX_PAGE = 100_000
+
+
+def _city_for_point(latitude: float, longitude: float) -> Optional[str]:
+    """Name of the known city whose box contains the point, if any."""
+    for name, (min_lng, min_lat, max_lng, max_lat) in CITY_BOUNDS.items():
+        if min_lng <= longitude <= max_lng and min_lat <= latitude <= max_lat:
+            return name
+    return None
+
+
+def _parse_bbox_or_400(bbox: str) -> BBox:
+    try:
+        return parse_bbox(bbox)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid bbox format: {exc}") from exc
+
+
+def _not_expired(now: datetime):
+    """Filter clause: the signal has no expiry, or its expiry is still ahead."""
+    return or_(Signal.expires_at.is_(None), Signal.expires_at > now)
+
+
 # Pydantic models for request/response
 class SignalCreate(BaseModel):
     latitude: float
     longitude: float
     signal_type: str
-    text_content: Optional[str] = None
-    media_url: Optional[str] = None
-    tags: Optional[List[str]] = None
-    brand: Optional[str] = None
-    product_sku: Optional[str] = None
+    text_content: Optional[str] = Field(None, max_length=5000, pattern=NO_NUL)
+    media_url: Optional[str] = Field(None, max_length=500, pattern=NO_NUL)
+    tags: Optional[List[Tag]] = Field(None, max_length=20)
+    brand: Optional[str] = Field(None, max_length=100, pattern=NO_NUL)
+    product_sku: Optional[str] = Field(None, max_length=100, pattern=NO_NUL)
     visibility: str = "public"
-    expires_hours: Optional[int] = None
-    
+    expires_hours: Optional[int] = Field(None, ge=1, le=720)  # one hour to thirty days
+
     @validator('signal_type')
     def validate_signal_type(cls, v):
         valid_types = ['SPOTTED', 'STOCK_CHECK', 'LINE_UPDATE', 'INTEL_REPORT', 'HEAT_CHECK', 'DROP_ALERT', 'GENERAL']
@@ -88,18 +133,19 @@ class SignalList(BaseModel):
     has_next: bool
 
 @router.post("/", response_model=SignalResponse, status_code=status.HTTP_201_CREATED)
-async def create_signal(
+def create_signal(
     signal_data: SignalCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Create a new signal"""
+    now = datetime.now(timezone.utc)
     
     # Check user's recent signal count (basic rate limiting)
     recent_signals = db.query(Signal).filter(
         and_(
             Signal.user_id == current_user.user_id,
-            Signal.created_at >= datetime.utcnow() - timedelta(minutes=15)
+            Signal.created_at >= now - timedelta(minutes=15)
         )
     ).count()
     
@@ -118,7 +164,8 @@ async def create_signal(
         tags=signal_data.tags,
         brand=signal_data.brand,
         product_sku=signal_data.product_sku,
-        visibility=signal_data.visibility
+        visibility=signal_data.visibility,
+        city=_city_for_point(signal_data.latitude, signal_data.longitude)
     )
     
     # Set coordinates and geohash
@@ -129,7 +176,7 @@ async def create_signal(
     
     # Set expiration if specified
     if signal_data.expires_hours:
-        signal.expires_at = datetime.utcnow() + timedelta(hours=signal_data.expires_hours)
+        signal.expires_at = now + timedelta(hours=signal_data.expires_hours)
     
     # Generate dedupe hash
     signal.generate_dedupe_hash_for_instance()
@@ -138,7 +185,7 @@ async def create_signal(
     duplicate = db.query(Signal).filter(
         and_(
             Signal.dedupe_hash == signal.dedupe_hash,
-            Signal.created_at >= datetime.utcnow() - timedelta(hours=1)
+            Signal.created_at >= now - timedelta(hours=1)
         )
     ).first()
     
@@ -184,14 +231,16 @@ async def create_signal(
     )
 
 @router.get("/", response_model=SignalList)
-async def list_signals(
+def list_signals(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
     city: Optional[str] = Query(None, description="Filter by city"),
-    signal_type: Optional[str] = Query(None, description="Filter by signal type"),
-    brand: Optional[str] = Query(None, description="Filter by brand"),
-    tags: Optional[str] = Query(None, description="Filter by tags (comma-separated)"),
-    time_window: Optional[str] = Query("24h", description="Time window: 1h, 24h, 7d"),
-    page: int = Query(1, ge=1),
+    signal_type: Optional[SignalTypeName] = Query(None, description="Filter by signal type"),
+    brand: Optional[str] = Query(None, max_length=100, pattern=NO_NUL, description="Filter by brand"),
+    tags: Optional[str] = Query(
+        None, max_length=500, pattern=NO_NUL, description="Filter by tags (comma-separated)"
+    ),
+    time_window: TimeWindow = Query("24h", description="Time window: 1h, 24h, 7d"),
+    page: int = Query(1, ge=1, le=MAX_PAGE),
     per_page: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
@@ -200,40 +249,31 @@ async def list_signals(
     # Calculate time window
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    now = datetime.now(timezone.utc)
+    cutoff_time = now - timedelta(hours=hours)
     
     # Base query for active signals
     query = db.query(Signal).filter(
         and_(
             Signal.created_at >= cutoff_time,
             Signal.is_flagged == False,
-            Signal.visibility.in_(['public', 'local'])
+            Signal.visibility.in_(['public', 'local']),
+            _not_expired(now)
         )
     )
     
     # Apply filters
     if bbox:
-        try:
-            min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(','))
-            bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-            query = query.filter(func.ST_Intersects(Signal.geom, bbox_geom))
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Invalid bbox format")
+        query = query.filter(within_bbox(Signal.geom, _parse_bbox_or_400(bbox)))
     
     if city:
-        # Simple city filtering - in production, use proper geocoding
-        city_filters = {
-            "boston": "42.3,42.4,-71.2,-71.0",
-            "nyc": "40.6,40.8,-74.1,-73.9", 
-            "la": "33.9,34.1,-118.3,-118.1",
-            "chicago": "41.8,42.0,-87.8,-87.6"
-        }
-        
-        if city.lower() in city_filters:
-            city_bbox = city_filters[city.lower()]
-            min_lng, min_lat, max_lng, max_lat = map(float, city_bbox.split(','))
-            bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-            query = query.filter(func.ST_Intersects(Signal.geom, bbox_geom))
+        city_bbox = CITY_BOUNDS.get(city.strip().lower())
+        if city_bbox is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown city. Supported cities: {', '.join(sorted(CITY_BOUNDS))}"
+            )
+        query = query.filter(within_bbox(Signal.geom, city_bbox))
     
     if signal_type:
         query = query.filter(Signal.signal_type == signal_type)
@@ -242,7 +282,7 @@ async def list_signals(
         query = query.filter(Signal.brand.ilike(f"%{brand}%"))
     
     if tags:
-        tag_list = [t.strip() for t in tags.split(',')]
+        tag_list = [t.strip() for t in tags.split(',') if t.strip()]
         for tag in tag_list:
             query = query.filter(Signal.tags.any(tag))
     
@@ -253,8 +293,8 @@ async def list_signals(
     signals_with_coords = (
         query.with_entities(
             Signal,
-            func.ST_Y(Signal.geom).label("lat"),
-            func.ST_X(Signal.geom).label("lng"),
+            point_lat(Signal.geom).label("lat"),
+            point_lng(Signal.geom).label("lng"),
         )
         .order_by(desc(Signal.created_at))
         .offset((page - 1) * per_page)
@@ -295,7 +335,7 @@ async def list_signals(
 async def get_signal_heatmap(
     bbox: Optional[str] = Query(None, description="Bounding box: min_lng,min_lat,max_lng,max_lat"),
     zoom: Optional[int] = Query(7, ge=4, le=10, description="Geohash precision level"),
-    time_window: Optional[str] = Query("24h", description="Time window: 1h, 24h, 7d"),
+    time_window: TimeWindow = Query("24h", description="Time window: 1h, 24h, 7d"),
     redis_client = Depends(get_redis),
     db: Session = Depends(get_db)
 ):
@@ -304,8 +344,11 @@ async def get_signal_heatmap(
     # Parse time window
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
+    parsed_bbox = _parse_bbox_or_400(bbox) if bbox else None
     
-    cache_key = f"signals:heatmap:{zoom}:{hours}h"
+    # "api" keeps these payloads apart from the raw buckets that the worker
+    # caches under signals:heatmap:{precision}:{hours}h
+    cache_key = f"signals:heatmap:api:{zoom}:{hours}h"
     if bbox:
         cache_key += f":bbox:{bbox}"
 
@@ -313,27 +356,24 @@ async def get_signal_heatmap(
     cache = CacheStrategy(redis_client)
 
     async def _build_payload():
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        now = datetime.now(timezone.utc)
+        cutoff_time = now - timedelta(hours=hours)
         query = db.query(Signal).filter(
             and_(
                 Signal.created_at >= cutoff_time,
                 Signal.is_flagged == False,
-                Signal.visibility.in_(['public', 'local'])
+                Signal.visibility.in_(['public', 'local']),
+                _not_expired(now)
             )
         )
 
-        if bbox:
-            try:
-                min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(','))
-                bbox_geom = func.ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-                query = query.filter(func.ST_Intersects(Signal.geom, bbox_geom))
-            except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail="Invalid bbox format")
+        if parsed_bbox:
+            query = query.filter(within_bbox(Signal.geom, parsed_bbox))
 
         signal_rows = query.with_entities(
             Signal,
-            func.ST_Y(Signal.geom).label("lat"),
-            func.ST_X(Signal.geom).label("lng"),
+            point_lat(Signal.geom).label("lat"),
+            point_lng(Signal.geom).label("lng"),
         ).all()
 
         signal_dicts = [
@@ -352,15 +392,11 @@ async def get_signal_heatmap(
             for signal, lat, lng in signal_rows
         ]
 
-        aggregated = SignalAggregator.aggregate_by_geohash(
-            signal_dicts,
-            precision=zoom,
-            time_window_hours=hours
-        )
-
-        if bbox:
-            bbox_list = [float(x) for x in bbox.split(',')]
-            aggregated = SignalAggregator.filter_by_bbox(aggregated, bbox_list)
+        # The query above is the only filter. Re-applying the time window here
+        # (against a slightly later clock) or the bbox (against cell centres,
+        # which can lie outside a box smaller than the cell) would drop signals
+        # that total_signals has already counted.
+        aggregated = SignalAggregator.aggregate_by_geohash(signal_dicts, precision=zoom)
 
         top_buckets = SignalAggregator.get_top_buckets(aggregated, limit=100)
 
@@ -377,8 +413,8 @@ async def get_signal_heatmap(
     return JSONResponse(content=payload)
 
 @router.post("/{signal_id}/boost")
-async def boost_signal(
-    signal_id: str,
+def boost_signal(
+    signal_id: uuid.UUID,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -400,8 +436,8 @@ async def boost_signal(
     return {"message": "Signal boosted", "boost_count": signal.boost_count}
 
 @router.get("/stats")
-async def get_signal_stats(
-    time_window: str = Query("24h", description="Time window: 1h, 24h, 7d"),
+def get_signal_stats(
+    time_window: TimeWindow = Query("24h", description="Time window: 1h, 24h, 7d"),
     db: Session = Depends(get_db)
 ):
     """Get signal statistics"""
@@ -409,13 +445,17 @@ async def get_signal_stats(
     # Parse time window
     time_windows = {"1h": 1, "24h": 24, "7d": 168}
     hours = time_windows.get(time_window, 24)
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+    now = datetime.now(timezone.utc)
+    cutoff_time = now - timedelta(hours=hours)
+    
+    # Signals created in the window that have not expired
+    in_window = and_(Signal.created_at >= cutoff_time, _not_expired(now))
     
     # Basic stats
-    total_signals = db.query(Signal).filter(Signal.created_at >= cutoff_time).count()
+    total_signals = db.query(Signal).filter(in_window).count()
     active_signals = db.query(Signal).filter(
         and_(
-            Signal.created_at >= cutoff_time,
+            in_window,
             Signal.is_flagged == False
         )
     ).count()
@@ -425,7 +465,7 @@ async def get_signal_stats(
         Signal.signal_type,
         func.count(Signal.id).label('count')
     ).filter(
-        Signal.created_at >= cutoff_time
+        in_window
     ).group_by(Signal.signal_type).all()
     
     # Brand breakdown
@@ -434,7 +474,7 @@ async def get_signal_stats(
         func.count(Signal.id).label('count')
     ).filter(
         and_(
-            Signal.created_at >= cutoff_time,
+            in_window,
             Signal.brand.isnot(None)
         )
     ).group_by(Signal.brand).order_by(desc('count')).limit(10).all()

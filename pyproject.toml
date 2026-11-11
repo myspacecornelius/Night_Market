@@ -13,8 +13,8 @@ target-version = ["py311"]
 line-length = 100
 target-version = "py311"
 lint.select = ["E","F","I","B","UP","SIM","N","S","ASYNC","Q"]
-lint.ignore = ["E203","W503"]  # black compatibility
-lint.fix = true
+lint.ignore = ["E203"]  # black compatibility
+fix = true
 exclude = ["frontend","infra"]
 
 [tool.mypy]
@@ -27,9 +27,9 @@ warn_unused_ignores = true
 warn_return_any = true
 strict_equality = true
 plugins = ["pydantic.mypy"]
-ruff.args = ["--config=/path/to/pyproject.toml"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-q"
-testpaths = ["services","worker","tests"]
-python_paths = "."
+testpaths = ["tests", "services/proxy/tests"]
+pythonpath = ["."]

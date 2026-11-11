@@ -11,6 +11,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from services.core.schema_compare import include_object_filter
 from services.models import Base  # Import your models here
 # Import all models to ensure they're registered with Base.metadata
 from services.models import User, Post, Like, Save, Release, Subscription, Location, LacesLedger
@@ -26,7 +27,9 @@ fileConfig(config.config_file_name)
 # Get the database url from the environment variable and set it in the config
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # ConfigParser treats "%" as interpolation, so a percent-encoded password
+    # (p%40ss for p@ss) made every alembic command fail before connecting.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 
 # add your model's MetaData object here
@@ -58,7 +61,11 @@ def run_migrations_online():
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata, compare_type=True
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            # autogenerate must not propose dropping the tables PostGIS created
+            include_object=include_object_filter(connection),
         )
 
         with context.begin_transaction():

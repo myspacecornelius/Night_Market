@@ -3,7 +3,7 @@ Geohash utilities for spatial aggregation and clustering
 """
 import geohash2
 from typing import List, Dict, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 
 class GeohashUtils:
@@ -31,7 +31,8 @@ class GeohashUtils:
     @staticmethod
     def decode(geohash: str) -> Tuple[float, float]:
         """Decode geohash to coordinates (lat, lng)"""
-        return geohash2.decode(geohash)
+        lat, lng, _, _ = geohash2.decode_exactly(geohash)
+        return lat, lng
     
     @staticmethod
     def get_precision_for_zoom(zoom_level: int) -> int:
@@ -64,8 +65,7 @@ class GeohashUtils:
     @staticmethod
     def get_bounding_box(geohash: str) -> Dict[str, float]:
         """Get bounding box for geohash"""
-        lat, lng = geohash2.decode(geohash)
-        lat_err, lng_err = geohash2.decode_exact(geohash)[2:]
+        lat, lng, lat_err, lng_err = geohash2.decode_exactly(geohash)
         
         return {
             'min_lat': lat - lat_err,
@@ -77,7 +77,7 @@ class GeohashUtils:
     @staticmethod
     def is_within_bbox(geohash: str, bbox: List[float]) -> bool:
         """Check if geohash center is within bounding box [min_lng, min_lat, max_lng, max_lat]"""
-        lat, lng = geohash2.decode(geohash)
+        lat, lng, _, _ = geohash2.decode_exactly(geohash)
         min_lng, min_lat, max_lng, max_lat = bbox
         
         return min_lat <= lat <= max_lat and min_lng <= lng <= max_lng
@@ -157,21 +157,28 @@ class SignalAggregator:
         cutoff_time = None
         
         if time_window_hours:
-            cutoff_time = datetime.utcnow() - timedelta(hours=time_window_hours)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
         
         for signal in signals:
-            # Filter by time window if specified
-            if cutoff_time and signal.get('created_at'):
-                signal_time = signal['created_at']
-                if isinstance(signal_time, str):
-                    signal_time = datetime.fromisoformat(signal_time.replace('Z', '+00:00'))
-                if signal_time < cutoff_time:
-                    continue
+            # created_at may be a datetime or an ISO string; naive values are UTC
+            signal_time = signal.get('created_at')
+            if isinstance(signal_time, str):
+                signal_time = datetime.fromisoformat(signal_time.replace('Z', '+00:00'))
+            if signal_time is not None and signal_time.tzinfo is None:
+                signal_time = signal_time.replace(tzinfo=timezone.utc)
             
-            # Get geohash at desired precision
-            if 'geohash' in signal:
-                geohash = signal['geohash'][:precision]
-            elif 'lat' in signal and 'lng' in signal:
+            # Filter by time window if specified
+            if cutoff_time and signal_time and signal_time < cutoff_time:
+                continue
+            
+            # Get geohash at desired precision. A stored hash shorter than that
+            # (signals keep 7 characters) cannot be sliced finer, so finer
+            # buckets are encoded from the coordinates.
+            stored_geohash = signal.get('geohash')
+            has_coordinates = signal.get('lat') is not None and signal.get('lng') is not None
+            if stored_geohash and (len(stored_geohash) >= precision or not has_coordinates):
+                geohash = stored_geohash[:precision]
+            elif has_coordinates:
                 geohash = GeohashUtils.encode(signal['lat'], signal['lng'], precision)
             else:
                 continue
@@ -215,10 +222,11 @@ class SignalAggregator:
             if len(bucket['sample_signals']) < 3:
                 bucket['sample_signals'].append({
                     'id': signal.get('id'),
-                    'text_content': signal.get('text_content', '')[:100],
+                    'text_content': (signal.get('text_content') or '')[:100],
                     'signal_type': signal.get('signal_type'),
                     'reputation_score': signal.get('reputation_score', 0),
-                    'created_at': signal.get('created_at')
+                    # ISO string, so buckets can be returned and cached as JSON
+                    'created_at': signal_time.isoformat() if signal_time else None
                 })
         
         # Post-process aggregated data

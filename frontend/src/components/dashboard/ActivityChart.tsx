@@ -1,8 +1,5 @@
-import React from 'react'
 import { motion } from 'framer-motion'
 import { 
-  LineChart, 
-  Line, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -69,6 +66,7 @@ export const ActivityChart = ({
     if (data.length < 2) return { value: 0, isPositive: true }
     const recent = data.slice(-3).reduce((sum, item) => sum + (item[key] as number), 0) / 3
     const previous = data.slice(-6, -3).reduce((sum, item) => sum + (item[key] as number), 0) / 3
+    if (previous === 0) return { value: 0, isPositive: true }
     const change = ((recent - previous) / previous) * 100
     return { value: Math.abs(change), isPositive: change > 0 }
   }

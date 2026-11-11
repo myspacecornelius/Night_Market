@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Enum, Float, Text, JSON
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Enum, Float, Index, Text, JSON, text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -54,6 +54,11 @@ class DropZone(Base):
     members = relationship("DropZoneMember", back_populates="dropzone", cascade="all, delete-orphan")
     check_ins = relationship("DropZoneCheckIn", back_populates="dropzone", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        # Bounding-box filters compare geometry, not geography (see services.core.geospatial.within_bbox)
+        Index('ix_dropzones_center_planar', text('(center_point::geometry)'), postgresql_using='gist'),
+    )
+
 class DropZoneMember(Base):
     __tablename__ = 'dropzone_members'
     
@@ -71,6 +76,11 @@ class DropZoneMember(Base):
     
     # Relationships
     dropzone = relationship("DropZone", back_populates="members")
+
+    __table_args__ = (
+        # One membership per person per zone
+        Index('uq_dropzone_members_zone_user', dropzone_id, user_id, unique=True),
+    )
 
 class DropZoneCheckIn(Base):
     __tablename__ = 'dropzone_checkins'
@@ -96,3 +106,13 @@ class DropZoneCheckIn(Base):
     
     # Relationships
     dropzone = relationship("DropZone", back_populates="check_ins")
+
+    __table_args__ = (
+        # One check-in per person per zone per UTC day
+        Index(
+            'uq_dropzone_checkins_zone_user_day',
+            dropzone_id, user_id, text("((checked_in_at AT TIME ZONE 'UTC')::date)"),
+            unique=True,
+        ),
+        Index('ix_dropzone_checkins_user_time', user_id, checked_in_at),
+    )

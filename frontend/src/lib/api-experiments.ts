@@ -1,11 +1,10 @@
 // Lightweight client wrappers for experimental endpoints.
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/lib/api/http';
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await apiFetch(path, {
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     ...init,
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

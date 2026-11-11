@@ -44,15 +44,20 @@ services:
       - PYTHONPATH=/app
       - RUN_MIGRATIONS=true
     working_dir: /app/services
-    command: sh -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health'); sys.exit(0)" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    # Migrations run before the server starts, so the database has to accept
+    # connections first; without the conditions the container exited on a slow start.
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - appnet
 
@@ -131,7 +136,8 @@ services:
   prometheus:
     image: prom/prometheus:v2.47.2
     ports:
-      - "9090:9090"
+      # Prometheus has no authentication: reachable from this machine only
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -144,7 +150,10 @@ services:
   grafana:
     image: grafana/grafana-oss:10.1.5
     ports:
-      - "3001:3001"
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    environment:
+      # Only applied the first time Grafana starts with an empty data volume
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources

@@ -135,7 +135,7 @@ export const usePatchItem = () => {
             toast.success('Item updated!');
             return { previousLists, previousDetail, detailQueryKey };
         },
-        onError: (err, newItemData, context) => {
+        onError: (err, _newItemData, context) => {
             toast.error(`Failed to update item: ${err.message}`);
             // Rollback on error
             if (context?.previousLists) {
@@ -147,7 +147,7 @@ export const usePatchItem = () => {
                 queryClient.setQueryData(context.detailQueryKey, context.previousDetail);
             }
         },
-        onSettled: (data, error, variables) => {
+        onSettled: (_data, _error, variables) => {
             // Invalidate queries to refetch from server and ensure consistency
             queryClient.invalidateQueries({ queryKey: ['items'] });
             queryClient.invalidateQueries({ queryKey: ['item', variables.id] });

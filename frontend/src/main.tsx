@@ -45,7 +45,7 @@ try {
             <Toaster position="top-right" />
           </ThemeProvider>
         </AuthProvider>
-        {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} position="bottom-right" /> : null}
+        {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" /> : null}
       </QueryClientProvider>
     </React.StrictMode>
   )
@@ -77,7 +77,7 @@ try {
           overflow: auto; 
           font-size: 14px;
           border: 1px solid rgba(255,255,255,0.1);
-        ">${error.message}</pre>
+        ">${(error instanceof Error ? error.message : String(error)).replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`)}</pre>
       </div>
     </div>
   `

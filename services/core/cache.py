@@ -62,9 +62,10 @@ class CacheStrategy:
 
         if self.redis.set(lock_key, token, nx=True, ex=lock_expiration):
             try:
-                payload = await loader()
-                self.redis.setex(key, ttl_seconds, json.dumps(payload, default=str))
-                return payload
+                serialized = json.dumps(await loader(), default=str)
+                self.redis.setex(key, ttl_seconds, serialized)
+                # Return what later cache hits will return, not the raw payload
+                return json.loads(serialized)
             finally:
                 # Release lock if still owned
                 if self.redis.get(lock_key) == token:
@@ -79,5 +80,5 @@ class CacheStrategy:
                     return json.loads(cached)
 
         # Lock holder failed to populate within window – compute without caching
-        return await loader()
+        return json.loads(json.dumps(await loader(), default=str))
 

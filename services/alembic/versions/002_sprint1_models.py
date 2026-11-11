@@ -7,6 +7,7 @@ Create Date: 2025-10-05 12:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSON
 from geoalchemy2 import Geography
 import uuid
@@ -27,27 +28,22 @@ def upgrade():
         'HEAT_CHECK', 'DROP_ALERT', 'GENERAL',
         name='signal_type_enum'
     )
-    try:
-        signal_type_enum.create(op.get_bind())
-    except:
-        pass  # Enum might already exist
+    signal_type_enum.create(op.get_bind(), checkfirst=True)
     
     # Create visibility enum (if not exists from posts)
     visibility_enum = sa.Enum('public', 'local', 'followers', 'private', name='visibility_enum')
-    try:
-        visibility_enum.create(op.get_bind())
-    except:
-        pass  # Enum might already exist
+    visibility_enum.create(op.get_bind(), checkfirst=True)
+    # The posts migration created this type with ('public', 'local', 'friends');
+    # add the values the signals table needs when the type already exists.
+    op.execute("ALTER TYPE visibility_enum ADD VALUE IF NOT EXISTS 'followers'")
+    op.execute("ALTER TYPE visibility_enum ADD VALUE IF NOT EXISTS 'private'")
     
     # Create drop_status enum
     drop_status_enum = sa.Enum(
         'upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended',
         name='drop_status_enum'
     )
-    try:
-        drop_status_enum.create(op.get_bind())
-    except:
-        pass  # Enum might already exist
+    drop_status_enum.create(op.get_bind(), checkfirst=True)
     
     # Create retailer_type enum
     retailer_type_enum = sa.Enum(
@@ -55,10 +51,7 @@ def upgrade():
         'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER',
         name='retailer_type_enum'
     )
-    try:
-        retailer_type_enum.create(op.get_bind())
-    except:
-        pass  # Enum might already exist
+    retailer_type_enum.create(op.get_bind(), checkfirst=True)
     
     # Create signals table
     op.create_table('signals',
@@ -67,7 +60,7 @@ def upgrade():
         sa.Column('geom', Geography(geometry_type='POINT', srid=4326), nullable=False),
         sa.Column('geohash', sa.String(12), nullable=False),
         sa.Column('city', sa.String(100), nullable=True),
-        sa.Column('signal_type', sa.Enum('SPOTTED', 'STOCK_CHECK', 'LINE_UPDATE', 'INTEL_REPORT', 'HEAT_CHECK', 'DROP_ALERT', 'GENERAL', name='signal_type_enum', create_type=False), nullable=False),
+        sa.Column('signal_type', postgresql.ENUM('SPOTTED', 'STOCK_CHECK', 'LINE_UPDATE', 'INTEL_REPORT', 'HEAT_CHECK', 'DROP_ALERT', 'GENERAL', name='signal_type_enum', create_type=False), nullable=False),
         sa.Column('text_content', sa.Text, nullable=True),
         sa.Column('media_url', sa.String(500), nullable=True),
         sa.Column('store_id', UUID(as_uuid=True), nullable=True),  # FK will be added after stores table
@@ -85,7 +78,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('visibility', sa.Enum('public', 'local', 'followers', 'private', name='visibility_enum', create_type=False), nullable=False, default='public')
+        sa.Column('visibility', postgresql.ENUM('public', 'local', 'followers', 'private', name='visibility_enum', create_type=False), nullable=False, default='public')
     )
     
     # Create stores table
@@ -99,7 +92,7 @@ def upgrade():
         sa.Column('state', sa.String(50), nullable=True),
         sa.Column('country', sa.String(50), nullable=False, default='US'),
         sa.Column('postal_code', sa.String(20), nullable=True),
-        sa.Column('retailer_type', sa.Enum('NIKE', 'ADIDAS', 'FOOTLOCKER', 'FINISH_LINE', 'CHAMPS', 'FOOTACTION', 'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER', name='retailer_type_enum', create_type=False), nullable=False),
+        sa.Column('retailer_type', postgresql.ENUM('NIKE', 'ADIDAS', 'FOOTLOCKER', 'FINISH_LINE', 'CHAMPS', 'FOOTACTION', 'JD_SPORTS', 'SNEAKERSNSTUFF', 'END', 'SIZE', 'BOUTIQUE', 'CONSIGNMENT', 'OTHER', name='retailer_type_enum', create_type=False), nullable=False),
         sa.Column('phone', sa.String(20), nullable=True),
         sa.Column('website_url', sa.String(500), nullable=True),
         sa.Column('social_links', JSON, nullable=True),
@@ -127,7 +120,7 @@ def upgrade():
         sa.Column('estimated_stock', sa.Integer, nullable=True),
         sa.Column('image_url', sa.String(500), nullable=True),
         sa.Column('images', ARRAY(sa.String), nullable=True),
-        sa.Column('status', sa.Enum('upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended', name='drop_status_enum', create_type=False), nullable=False, default='upcoming'),
+        sa.Column('status', postgresql.ENUM('upcoming', 'live', 'sold_out', 'delayed', 'cancelled', 'ended', name='drop_status_enum', create_type=False), nullable=False, default='upcoming'),
         sa.Column('regions', ARRAY(sa.String), nullable=True),
         sa.Column('release_type', sa.String(50), nullable=True),
         sa.Column('links', JSON, nullable=True),

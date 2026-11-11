@@ -1,670 +1,955 @@
-import React, { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import type { FormEvent, RefObject } from 'react'
+import { motion } from 'framer-motion'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { 
-  User, 
-  Edit3, 
-  Settings, 
-  Trophy, 
-  Calendar,
-  MapPin,
-  Mail,
-  Globe,
-  Shield,
-  Bell,
-  Eye,
-  Camera,
-  Save,
-  X,
-  Check,
-  Star,
+import type { UseMutationResult } from '@tanstack/react-query'
+import {
   Activity,
-  Award,
-  TrendingUp
+  BadgeCheck,
+  Calendar,
+  CircleAlert,
+  Edit3,
+  EyeOff,
+  Globe,
+  Mail,
+  MapPin,
+  Save,
+  Shield,
+  X,
+  Zap,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { FormField } from '@/components/forms/FormField'
-import { cn } from '@/lib/cn'
-import { apiClient } from '@/lib/api-client'
-import { useAuth } from '@/hooks/useAuth'
-import { toast } from 'sonner'
 
-interface UserProfile {
-  id: string
-  username: string
-  displayName: string
-  email: string
-  avatar?: string
-  bio?: string
-  location?: string
-  website?: string
-  joinedAt: string
-  lastActive: string
-  stats: {
-    totalScore: number
-    rank: number
-    achievements: number
-    connections: number
-  }
-  achievements: Array<{
-    id: string
-    name: string
-    description: string
-    iconName: string
-    earnedAt: string
-    rarity: 'common' | 'rare' | 'epic' | 'legendary'
-  }>
-  settings: {
-    privacy: {
-      profileVisibility: 'public' | 'friends' | 'private'
-      showEmail: boolean
-      showActivity: boolean
-    }
-    notifications: {
-      email: boolean
-      push: boolean
-      achievements: boolean
-      social: boolean
-    }
+import { ChangePasswordCard } from '@/components/account/ChangePasswordCard'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/Button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { PROFILE_LIMITS, UsersAPI, UsersApiError } from '@/lib/api/users'
+import type { UpdateProfileRequest, UserPost, UserProfile } from '@/lib/api/users'
+
+const PROFILE_KEY = ['profile', 'me'] as const
+const STATS_KEY = ['profile', 'stats'] as const
+const postsKey = (userId: string) => ['profile', 'posts', userId] as const
+
+/** How many of the user's latest posts the Posts tab asks the API for. */
+const RECENT_POSTS_LIMIT = 5
+
+type ProfileTab = 'overview' | 'posts' | 'settings'
+
+/** The profile fields edited as text, in the order the form shows them. */
+type TextField = 'display_name' | 'bio' | 'location' | 'website_url' | 'avatar_url'
+type FormValues = Record<TextField, string>
+type FieldErrors = Partial<Record<TextField, string>>
+
+const TEXT_FIELDS: readonly TextField[] = ['display_name', 'bio', 'location', 'website_url', 'avatar_url']
+const CLEARABLE_FIELDS = ['bio', 'location', 'website_url', 'avatar_url'] as const
+
+const FIELD_LABELS: Record<TextField, string> = {
+  display_name: 'Display name',
+  bio: 'Bio',
+  location: 'Location',
+  website_url: 'Website',
+  avatar_url: 'Avatar URL',
+}
+
+const POST_TYPE_LABELS: Record<string, string> = {
+  SPOTTED: 'Spotted',
+  STOCK_CHECK: 'Stock check',
+  LINE_UPDATE: 'Line update',
+  GENERAL: 'General',
+  HEAT_CHECK: 'Heat check',
+  INTEL_REPORT: 'Intel report',
+}
+
+/** Shown on a post that is not public, so the author knows who else can see it. */
+const RESTRICTED_VISIBILITY_LABELS: Record<string, string> = {
+  local: 'Local',
+  friends: 'Friends',
+  private: 'Private',
+}
+
+const numberFormat = new Intl.NumberFormat('en-US')
+
+function formatNumber(value: number): string {
+  return numberFormat.format(value)
+}
+
+function countOf(value: number, singular: string): string {
+  return `${formatNumber(value)} ${value === 1 ? singular : `${singular}s`}`
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString()
+}
+
+/** The API counts characters (code points), not UTF-16 units. */
+function characterCount(value: string): number {
+  return Array.from(value).length
+}
+
+function isHttpUrl(value: string): boolean {
+  if (/\s/.test(value) || !/^https?:\/\//i.test(value)) return false
+  try {
+    return new URL(value).hostname !== ''
+  } catch {
+    return false
   }
 }
 
-interface ProfileFormData {
-  displayName: string
-  bio: string
-  location: string
-  website: string
+/**
+ * For every text a member typed. A name, bio or tag can be one long word (the API allows
+ * 100 to 500 characters without a space): it has to break inside the word, and has to count
+ * as breakable when the layout is sized, or the whole page becomes as wide as that word.
+ * (break-words only does the first of the two.)
+ */
+const USER_TEXT = '[overflow-wrap:anywhere]'
+
+/** Registration accepts a display name made of spaces only: such an account goes by its username. */
+function shownName(profile: UserProfile): string {
+  return profile.display_name.trim() || profile.username
+}
+
+function initialsOf(profile: UserProfile): string {
+  const words = profile.display_name.trim().split(/\s+/).filter(Boolean)
+  const letters = words.slice(0, 2).map((word) => Array.from(word)[0])
+  return (letters.join('') || profile.username.charAt(0)).toUpperCase()
+}
+
+function valuesFrom(profile: UserProfile): FormValues {
+  return {
+    display_name: profile.display_name,
+    bio: profile.bio ?? '',
+    location: profile.location ?? '',
+    website_url: profile.website_url ?? '',
+    avatar_url: profile.avatar_url ?? '',
+  }
+}
+
+/** The same rules PATCH /users/me enforces, checked before sending. */
+function validate(values: FormValues): FieldErrors {
+  const errors: FieldErrors = {}
+
+  if (values.display_name.trim() === '') {
+    errors.display_name = 'Display name is required'
+  }
+  for (const field of TEXT_FIELDS) {
+    const limit = PROFILE_LIMITS[field]
+    if (!errors[field] && characterCount(values[field].trim()) > limit) {
+      errors[field] = `${FIELD_LABELS[field]} must be ${limit} characters or fewer`
+    }
+  }
+  for (const field of ['website_url', 'avatar_url'] as const) {
+    const value = values[field].trim()
+    if (!errors[field] && value !== '' && !isHttpUrl(value)) {
+      errors[field] = `${FIELD_LABELS[field]} must be a link starting with http:// or https://`
+    }
+  }
+  return errors
+}
+
+/** Only what differs from the saved profile; a blank optional field is sent as null to clear it. */
+function changesBetween(profile: UserProfile, values: FormValues): UpdateProfileRequest {
+  const changes: UpdateProfileRequest = {}
+  const displayName = values.display_name.trim()
+  if (displayName !== profile.display_name) changes.display_name = displayName
+  for (const field of CLEARABLE_FIELDS) {
+    const next = values[field].trim() || null
+    if (next !== (profile[field] || null)) changes[field] = next
+  }
+  return changes
+}
+
+type ProfileUpdate = UseMutationResult<UserProfile, Error, UpdateProfileRequest>
+
+/**
+ * PATCH /users/me. The answer replaces the profile on this page, and every other place
+ * that shows the user (the app shell, the dashboard, the leaderboard) is told to reload.
+ */
+function useUpdateProfile(): ProfileUpdate {
+  const queryClient = useQueryClient()
+  return useMutation<UserProfile, Error, UpdateProfileRequest>({
+    mutationFn: (changes) => UsersAPI.updateMe(changes),
+    // Every answer is the whole account as it was when that request was handled. The edit
+    // form and the privacy switch can both be saving: one request at a time, so an older
+    // answer can never arrive last and put back what the newer request changed.
+    scope: { id: 'profile-update' },
+    onSuccess: async (updated) => {
+      // A profile reload that started before the save must not overwrite its result.
+      await queryClient.cancelQueries({ queryKey: PROFILE_KEY })
+      queryClient.setQueryData<UserProfile>(PROFILE_KEY, updated)
+      void queryClient.invalidateQueries({ queryKey: ['currentUser'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['leaderboard'] })
+    },
+  })
+}
+
+function ErrorNotice({
+  title,
+  error,
+  retryLabel,
+  onRetry,
+  isRetrying,
+}: {
+  title: string
+  error: Error
+  retryLabel: string
+  onRetry: () => void
+  isRetrying: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div role="alert" className="flex items-start gap-3">
+        <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
+        <div>
+          <p className="font-medium">{title}</p>
+          <p className={`text-sm text-muted-foreground ${USER_TEXT}`}>{error.message}</p>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" aria-label={retryLabel} onClick={onRetry} disabled={isRetrying}>
+        Retry
+      </Button>
+    </div>
+  )
+}
+
+function ProfileSkeleton() {
+  return (
+    <div role="status" aria-label="Loading profile" className="space-y-6">
+      <div className="flex items-center gap-4">
+        <Skeleton className="h-20 w-20 rounded-full" />
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <Skeleton key={index} className="h-24 w-full rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-48 w-full rounded-lg" />
+    </div>
+  )
+}
+
+function ProfileHeader({
+  profile,
+  isEditing,
+  onEdit,
+  editButtonRef,
+}: {
+  profile: UserProfile
+  isEditing: boolean
+  onEdit: () => void
+  editButtonRef: RefObject<HTMLButtonElement>
+}) {
+  const avatarUrl = profile.avatar_url && isHttpUrl(profile.avatar_url) ? profile.avatar_url : undefined
+
+  return (
+    <Card role="region" aria-label="Profile" className="overflow-hidden">
+      <div className="h-32 bg-gradient-to-r from-primary/20 via-primary/10 to-secondary/20" />
+      <CardContent className="relative pt-0">
+        <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-10">
+          <Avatar className="w-20 h-20 border-4 border-background">
+            {avatarUrl && <AvatarImage src={avatarUrl} alt="" />}
+            <AvatarFallback className="text-lg">{initialsOf(profile)}</AvatarFallback>
+          </Avatar>
+
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className={`text-2xl font-bold text-foreground ${USER_TEXT}`}>{shownName(profile)}</h1>
+              {profile.is_verified && (
+                <Badge variant="secondary" className="gap-1">
+                  <BadgeCheck className="h-3 w-3" aria-hidden="true" />
+                  Verified
+                </Badge>
+              )}
+              {profile.is_anonymous && (
+                <Badge variant="outline" className="gap-1">
+                  <EyeOff className="h-3 w-3" aria-hidden="true" />
+                  Anonymous to others
+                </Badge>
+              )}
+            </div>
+            <p className={`text-muted-foreground ${USER_TEXT}`}>@{profile.username}</p>
+            {profile.created_at && (
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Calendar className="h-4 w-4" aria-hidden="true" />
+                <span>
+                  Joined <time dateTime={profile.created_at}>{formatDay(profile.created_at)}</time>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {!isEditing && (
+            <Button ref={editButtonRef} size="sm" variant="outline" onClick={onEdit}>
+              <Edit3 className="h-4 w-4 mr-2" aria-hidden="true" />
+              Edit Profile
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function StatCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <Card role="group" aria-label={label}>
+      <CardContent className="pt-6">
+        <div className="text-center">
+          <div className="text-2xl font-bold text-primary">{value}</div>
+          <p className="text-sm text-muted-foreground">{label}</p>
+          {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function StatsSection({ profile }: { profile: UserProfile }) {
+  const statsQuery = useQuery({
+    queryKey: STATS_KEY,
+    queryFn: () => UsersAPI.getStats(),
+    // These numbers change on other pages (posting, check-ins, boosts): reload on every visit.
+    staleTime: 0,
+  })
+  const stats = statsQuery.data
+
+  return (
+    <section aria-labelledby="profile-stats-heading" className="space-y-3">
+      <h2 id="profile-stats-heading" className="sr-only">
+        Your stats
+      </h2>
+
+      {statsQuery.isError && (
+        <ErrorNotice
+          title={
+            stats
+              ? 'Could not refresh your stats. Showing the last loaded numbers.'
+              : 'Could not load your rank and activity'
+          }
+          error={statsQuery.error}
+          retryLabel="Retry loading stats"
+          onRetry={() => void statsQuery.refetch()}
+          isRetrying={statsQuery.isFetching}
+        />
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          label="LACES Balance"
+          value={formatNumber(profile.laces_balance)}
+          detail={stats ? `${formatNumber(stats.lacesEarnedThisWeek)} earned this week` : undefined}
+        />
+        {stats ? (
+          <>
+            <StatCard
+              label="Community Rank"
+              value={`#${formatNumber(stats.communityRank)}`}
+              detail={`of ${countOf(stats.totalUsers, 'member')}`}
+            />
+            <StatCard
+              label="Signals Posted"
+              value={formatNumber(stats.signalsPosted)}
+              detail={countOf(stats.totalViews, 'view')}
+            />
+            <StatCard label="Check-ins" value={formatNumber(stats.checkIns)} detail="at drop zones" />
+          </>
+        ) : (
+          statsQuery.isPending && (
+            <div
+              role="status"
+              aria-label="Loading stats"
+              className="col-span-2 md:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4"
+            >
+              {Array.from({ length: 3 }, (_, index) => (
+                <Skeleton key={index} className="h-24 w-full rounded-lg" />
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AboutDetails({ profile }: { profile: UserProfile }) {
+  const website = profile.website_url
+
+  return (
+    <div className="space-y-4">
+      {profile.bio ? (
+        <p className={`text-muted-foreground whitespace-pre-wrap ${USER_TEXT}`}>{profile.bio}</p>
+      ) : (
+        <p className="text-muted-foreground italic">No bio yet. Use Edit Profile to add one.</p>
+      )}
+
+      <Separator />
+
+      <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <dt className="text-sm font-medium text-muted-foreground">Location</dt>
+          <dd className="flex items-center gap-2 mt-1 min-w-0">
+            <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className={USER_TEXT}>{profile.location || 'Not specified'}</span>
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-sm font-medium text-muted-foreground">Website</dt>
+          <dd className="flex items-center gap-2 mt-1 min-w-0">
+            <Globe className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {website && isHttpUrl(website) ? (
+              <a
+                href={website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline break-all"
+              >
+                {website}
+              </a>
+            ) : (
+              <span className="break-all">{website || 'Not specified'}</span>
+            )}
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-sm font-medium text-muted-foreground">Email (only you can see this)</dt>
+          <dd className="flex items-center gap-2 mt-1 min-w-0">
+            <Mail className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="break-all">{profile.email}</span>
+          </dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
+function ProfileTextField({
+  field,
+  value,
+  onChange,
+  error,
+  hint,
+  type = 'text',
+  multiline = false,
+  required = false,
+  placeholder,
+  disabled,
+  focusOnMount = false,
+}: {
+  field: TextField
+  value: string
+  onChange: (value: string) => void
+  error?: string
+  hint?: string
+  type?: 'text' | 'url'
+  multiline?: boolean
+  required?: boolean
+  placeholder?: string
+  disabled: boolean
+  /** The form replaces the button that opened it: focus moves into its first field. */
+  focusOnMount?: boolean
+}) {
+  const id = `profile-edit-${field}`
+  const hintId = hint ? `${id}-hint` : undefined
+  const errorId = error ? `${id}-error` : undefined
+  const describedBy = [errorId, hintId].filter(Boolean).join(' ') || undefined
+  const invalidClass = error ? 'border-destructive focus-visible:ring-destructive' : undefined
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>
+        {FIELD_LABELS[field]}
+        {required && (
+          <span className="text-destructive ml-1" aria-hidden="true">
+            *
+          </span>
+        )}
+      </Label>
+      {multiline ? (
+        <Textarea
+          id={id}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows={4}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={invalidClass}
+        />
+      ) : (
+        <Input
+          id={id}
+          type={type}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+          required={required}
+          autoFocus={focusOnMount}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={invalidClass}
+        />
+      )}
+      {error && (
+        <p id={errorId} role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {hint && (
+        <p id={hintId} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function EditProfileForm({
+  profile,
+  onDone,
+  onCancel,
+}: {
+  profile: UserProfile
+  /** Called when the form is finished, with the message to confirm it. */
+  onDone: (message: string) => void
+  onCancel: () => void
+}) {
+  const [values, setValues] = useState<FormValues>(() => valuesFrom(profile))
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [formError, setFormError] = useState<string | null>(null)
+  const save = useUpdateProfile()
+
+  const setField = (field: TextField) => (value: string) => {
+    setValues((current) => ({ ...current, [field]: value }))
+    // The message described the old value.
+    setErrors((current) => (current[field] ? { ...current, [field]: undefined } : current))
+  }
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (save.isPending) return
+
+    const found = validate(values)
+    setErrors(found)
+    setFormError(null)
+    const firstInvalid = TEXT_FIELDS.find((field) => found[field])
+    if (firstInvalid) {
+      document.getElementById(`profile-edit-${firstInvalid}`)?.focus()
+      return
+    }
+
+    const changes = changesBetween(profile, values)
+    if (Object.keys(changes).length === 0) {
+      onDone('No changes to save.')
+      return
+    }
+
+    save.mutate(changes, {
+      onSuccess: () => onDone('Profile updated.'),
+      onError: (error) => {
+        // A 422 names the fields it refused: show each message next to its field.
+        const refused: FieldErrors = {}
+        if (error instanceof UsersApiError) {
+          for (const field of TEXT_FIELDS) {
+            const message = error.fieldErrors[field]
+            if (message) refused[field] = message
+          }
+        }
+        setErrors(refused)
+        setFormError(
+          Object.keys(refused).length > 0
+            ? 'Your profile was not saved: some fields were not accepted. Fix them and save again.'
+            : `Your profile was not saved: ${error.message}`,
+        )
+      },
+    })
+  }
+
+  const disabled = save.isPending
+
+  return (
+    <form onSubmit={handleSubmit} noValidate aria-label="Edit profile" className="space-y-4">
+      <ProfileTextField
+        field="display_name"
+        value={values.display_name}
+        onChange={setField('display_name')}
+        error={errors.display_name}
+        hint={`The name shown on your profile. Up to ${PROFILE_LIMITS.display_name} characters.`}
+        required
+        focusOnMount
+        disabled={disabled}
+      />
+      <ProfileTextField
+        field="bio"
+        value={values.bio}
+        onChange={setField('bio')}
+        error={errors.bio}
+        hint={`${characterCount(values.bio.trim())}/${PROFILE_LIMITS.bio} characters`}
+        placeholder="Tell the community about yourself..."
+        multiline
+        disabled={disabled}
+      />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ProfileTextField
+          field="location"
+          value={values.location}
+          onChange={setField('location')}
+          error={errors.location}
+          placeholder="City, Country"
+          disabled={disabled}
+        />
+        <ProfileTextField
+          field="website_url"
+          value={values.website_url}
+          onChange={setField('website_url')}
+          error={errors.website_url}
+          type="url"
+          placeholder="https://yourwebsite.com"
+          disabled={disabled}
+        />
+      </div>
+      <ProfileTextField
+        field="avatar_url"
+        value={values.avatar_url}
+        onChange={setField('avatar_url')}
+        error={errors.avatar_url}
+        hint="A link to an image. Leave it empty to show your initials."
+        type="url"
+        placeholder="https://example.com/avatar.png"
+        disabled={disabled}
+      />
+
+      {formError && (
+        <p role="alert" className="text-sm text-destructive">
+          {formError}
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onCancel} disabled={disabled}>
+          <X className="h-4 w-4 mr-2" aria-hidden="true" />
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={disabled}>
+          <Save className="h-4 w-4 mr-2" aria-hidden="true" />
+          {save.isPending ? 'Saving...' : 'Save changes'}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function postTypeLabel(type: string): string {
+  const known = POST_TYPE_LABELS[type]
+  if (known) return known
+  const words = type.toLowerCase().replaceAll('_', ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+function PostRow({ post }: { post: UserPost }) {
+  const restricted = post.visibility === 'public' ? undefined : RESTRICTED_VISIBILITY_LABELS[post.visibility] ?? post.visibility
+  const isPinned = post.geo_tag_lat !== null && post.geo_tag_long !== null
+  const tags = post.tags ?? []
+
+  return (
+    <li className="space-y-2 p-3 border rounded-lg">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">{postTypeLabel(post.post_type)}</Badge>
+        {restricted && <Badge variant="outline">{restricted}</Badge>}
+        <time dateTime={post.timestamp} className="text-xs text-muted-foreground">
+          {formatDateTime(post.timestamp)}
+        </time>
+      </div>
+
+      {post.content_text?.trim() ? (
+        <p className={`whitespace-pre-wrap ${USER_TEXT}`}>{post.content_text}</p>
+      ) : (
+        <p className="italic text-muted-foreground">This post has no text.</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <Zap className="h-3 w-3" aria-hidden="true" />
+          {formatNumber(post.boost_score)} LACES in boosts
+        </span>
+        {isPinned && (
+          <span className="inline-flex items-center gap-1">
+            <MapPin className="h-3 w-3" aria-hidden="true" />
+            Pinned to a location
+          </span>
+        )}
+        {tags.map((tag, index) => (
+          // The API does not remove repeated tags, so the tag alone is not a unique key.
+          <span key={`${index}-${tag}`} className={USER_TEXT}>
+            #{tag}
+          </span>
+        ))}
+      </div>
+    </li>
+  )
+}
+
+function RecentPostsCard({ userId }: { userId: string }) {
+  const postsQuery = useQuery({
+    queryKey: postsKey(userId),
+    queryFn: () => UsersAPI.getPosts(userId, { limit: RECENT_POSTS_LIMIT }),
+    staleTime: 0,
+  })
+  const posts = postsQuery.data
+
+  return (
+    <Card role="region" aria-labelledby="profile-posts-heading">
+      <CardHeader>
+        <CardTitle id="profile-posts-heading" className="flex items-center gap-2">
+          <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
+          Recent Posts
+        </CardTitle>
+        <CardDescription>
+          Your latest posts, newest first. Posts that are not public are only listed for you.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {postsQuery.isError && (
+          <ErrorNotice
+            title={posts ? 'Could not refresh your posts. Showing the last loaded list.' : 'Could not load your posts'}
+            error={postsQuery.error}
+            retryLabel="Retry loading posts"
+            onRetry={() => void postsQuery.refetch()}
+            isRetrying={postsQuery.isFetching}
+          />
+        )}
+
+        {posts ? (
+          posts.length > 0 ? (
+            <ul className="space-y-2">
+              {posts.map((post) => (
+                <PostRow key={post.post_id} post={post} />
+              ))}
+            </ul>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" aria-hidden="true" />
+              <p>You have not posted anything yet.</p>
+              <p className="text-sm">Your posts will show up here once you share one.</p>
+            </div>
+          )
+        ) : (
+          postsQuery.isPending && (
+            <div role="status" aria-label="Loading posts" className="space-y-2">
+              {Array.from({ length: 3 }, (_, index) => (
+                <Skeleton key={index} className="h-20 w-full" />
+              ))}
+            </div>
+          )
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function PrivacyCard({
+  profile,
+  update,
+}: {
+  profile: UserProfile
+  /** Owned by the page, so a change still being saved survives a look at another tab. */
+  update: ProfileUpdate
+}) {
+  // While the change is being saved the switch shows what was asked for.
+  const checked = update.isPending ? update.variables.is_anonymous ?? profile.is_anonymous : profile.is_anonymous
+
+  return (
+    <Card role="region" aria-labelledby="profile-privacy-heading">
+      <CardHeader>
+        <CardTitle id="profile-privacy-heading" className="flex items-center gap-2">
+          <Shield className="h-5 w-5 text-primary" aria-hidden="true" />
+          Privacy Settings
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="profile-anonymous" className="text-base font-medium">
+              Appear as anonymous
+            </Label>
+            <p id="profile-anonymous-description" className="text-sm text-muted-foreground">
+              Other members see &ldquo;anonymous&rdquo; instead of your username and avatar in the activity feed and
+              on leaderboards, and you are left out of the member list.
+            </p>
+          </div>
+          <Switch
+            id="profile-anonymous"
+            checked={checked}
+            onCheckedChange={(next) => update.mutate({ is_anonymous: next })}
+            disabled={update.isPending}
+            aria-describedby="profile-anonymous-description"
+          />
+        </div>
+
+        {/* Always mounted so screen readers announce the confirmation when it appears. */}
+        <div role="status" className={update.isSuccess ? 'text-sm text-green-600' : 'sr-only'}>
+          {update.isSuccess &&
+            (profile.is_anonymous
+              ? 'Saved. Other members now see you as anonymous.'
+              : 'Saved. Other members now see your username and avatar.')}
+        </div>
+        {update.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            Your privacy setting was not changed: {update.error.message}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export default function Profile() {
-  const { user } = useAuth()
-  const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState<ProfileTab>('overview')
   const [isEditing, setIsEditing] = useState(false)
-  const [activeTab, setActiveTab] = useState('overview')
-  const [formData, setFormData] = useState<ProfileFormData>({
-    displayName: '',
-    bio: '',
-    location: '',
-    website: ''
-  })
+  const [notice, setNotice] = useState<string | null>(null)
+  const privacyUpdate = useUpdateProfile()
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  // Set when the form closes: the Edit button that comes back in its place gets the focus.
+  const formJustClosed = useRef(false)
 
-  // Fetch user profile
-  const { data: profile, isLoading } = useQuery({
-    queryKey: ['userProfile', user?.id],
-    queryFn: async (): Promise<UserProfile> => {
-      // Mock data - would come from API
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      return {
-        id: user?.id || 'user-1',
-        username: user?.username || 'johndoe',
-        displayName: user?.displayName || 'John Doe',
-        email: user?.email || 'john@example.com',
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username}`,
-        bio: 'Full-stack developer passionate about creating amazing user experiences. Love working with React, TypeScript, and modern web technologies.',
-        location: 'San Francisco, CA',
-        website: 'https://johndoe.dev',
-        joinedAt: '2023-01-15T00:00:00Z',
-        lastActive: new Date().toISOString(),
-        stats: {
-          totalScore: 1250,
-          rank: 15,
-          achievements: 12,
-          connections: 89
-        },
-        achievements: [
-          {
-            id: 'first-login',
-            name: 'Welcome Aboard',
-            description: 'Complete your first login',
-            iconName: 'star',
-            earnedAt: '2023-01-15T10:30:00Z',
-            rarity: 'common'
-          },
-          {
-            id: 'profile-complete',
-            name: 'Profile Master',
-            description: 'Complete your profile information',
-            iconName: 'user',
-            earnedAt: '2023-01-16T14:20:00Z',
-            rarity: 'rare'
-          },
-          {
-            id: 'top-contributor',
-            name: 'Top Contributor',
-            description: 'Rank in the top 20 contributors',
-            iconName: 'trophy',
-            earnedAt: '2023-02-28T09:15:00Z',
-            rarity: 'epic'
-          }
-        ],
-        settings: {
-          privacy: {
-            profileVisibility: 'public',
-            showEmail: false,
-            showActivity: true
-          },
-          notifications: {
-            email: true,
-            push: true,
-            achievements: true,
-            social: false
-          }
-        }
-      }
-    },
-    enabled: !!user,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  })
+  useEffect(() => {
+    if (isEditing || !formJustClosed.current) return
+    formJustClosed.current = false
+    // A save can be answered while another tab is looked at: the focus then stays where
+    // the user is. (Read here, not where the form reports back: that callback was created
+    // when the save started and only knows the tab that was open then.)
+    if (activeTab === 'overview') editButtonRef.current?.focus()
+  }, [isEditing, activeTab])
 
-  // Update profile mutation
-  const updateProfileMutation = useMutation({
-    mutationFn: async (data: ProfileFormData) => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      return { ...profile, ...data }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['userProfile'] })
-      toast.success('Profile updated successfully!')
-      setIsEditing(false)
-    },
-    onError: () => {
-      toast.error('Failed to update profile. Please try again.')
+  const profileQuery = useQuery({
+    queryKey: PROFILE_KEY,
+    queryFn: () => UsersAPI.getMe(),
+    // The balance changes on other pages: reload on every visit.
+    staleTime: 0,
+  })
+  const profile = profileQuery.data
+
+  if (!profile) {
+    if (profileQuery.isError) {
+      return (
+        <ErrorNotice
+          title="Could not load your profile"
+          error={profileQuery.error}
+          retryLabel="Retry loading profile"
+          onRetry={() => void profileQuery.refetch()}
+          isRetrying={profileQuery.isFetching}
+        />
+      )
     }
-  })
+    return <ProfileSkeleton />
+  }
 
-  // Update settings mutation
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: Partial<UserProfile['settings']>) => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500))
-      return settings
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['userProfile'] })
-      toast.success('Settings updated!')
-    },
-    onError: () => {
-      toast.error('Failed to update settings.')
-    }
-  })
-
-  React.useEffect(() => {
-    if (profile && !isEditing) {
-      setFormData({
-        displayName: profile.displayName,
-        bio: profile.bio || '',
-        location: profile.location || '',
-        website: profile.website || ''
-      })
-    }
-  }, [profile, isEditing])
-
-  const handleEdit = () => {
+  const startEditing = () => {
+    setActiveTab('overview')
+    setNotice(null)
     setIsEditing(true)
   }
 
-  const handleCancel = () => {
+  const finishEditing = (message: string | null) => {
+    formJustClosed.current = true
     setIsEditing(false)
-    if (profile) {
-      setFormData({
-        displayName: profile.displayName,
-        bio: profile.bio || '',
-        location: profile.location || '',
-        website: profile.website || ''
-      })
-    }
+    setNotice(message)
   }
 
-  const handleSave = () => {
-    updateProfileMutation.mutate(formData)
-  }
-
-  const handleInputChange = (field: keyof ProfileFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
-
-  const handleSettingChange = (category: 'privacy' | 'notifications', setting: string, value: boolean | string) => {
-    if (profile) {
-      const updatedSettings = {
-        ...profile.settings,
-        [category]: {
-          ...profile.settings[category],
-          [setting]: value
-        }
-      }
-      updateSettingsMutation.mutate(updatedSettings)
-    }
-  }
-
-  const getRarityColor = (rarity: string) => {
-    switch (rarity) {
-      case 'common': return 'text-gray-600 bg-gray-100'
-      case 'rare': return 'text-blue-600 bg-blue-100'
-      case 'epic': return 'text-purple-600 bg-purple-100'
-      case 'legendary': return 'text-yellow-600 bg-yellow-100'
-      default: return 'text-gray-600 bg-gray-100'
-    }
-  }
-
-  const getAchievementIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'star': return <Star className="h-4 w-4" />
-      case 'user': return <User className="h-4 w-4" />
-      case 'trophy': return <Trophy className="h-4 w-4" />
-      default: return <Award className="h-4 w-4" />
-    }
-  }
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <div className="w-20 h-20 bg-muted rounded-full animate-pulse" />
-          <div className="space-y-2">
-            <div className="w-48 h-8 bg-muted rounded animate-pulse" />
-            <div className="w-32 h-4 bg-muted rounded animate-pulse" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="w-full h-32 bg-muted rounded-lg animate-pulse" />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (!profile) {
-    return <div>Profile not found</div>
+  const changeTab = (value: string) => {
+    if (value !== 'overview' && value !== 'posts' && value !== 'settings') return
+    if (value === activeTab) return
+    // A confirmation is dropped once the user leaves the tab it was shown on. One that
+    // arrived while they were elsewhere (a save that finished later) waits for them.
+    if (activeTab === 'overview') setNotice(null)
+    if (activeTab === 'settings' && !privacyUpdate.isPending) privacyUpdate.reset()
+    setActiveTab(value)
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="relative"
-      >
-        <Card className="overflow-hidden">
-          <div className="h-32 bg-gradient-to-r from-primary/20 via-primary/10 to-secondary/20" />
-          <CardContent className="relative pt-0">
-            <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-10">
-              <div className="relative">
-                <Avatar className="w-20 h-20 border-4 border-background">
-                  <AvatarImage src={profile.avatar} alt={profile.displayName} />
-                  <AvatarFallback className="text-lg">
-                    {profile.displayName.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full p-0"
-                >
-                  <Camera className="h-3 w-3" />
-                </Button>
-              </div>
-              
-              <div className="flex-1 space-y-1">
-                {isEditing ? (
-                  <FormField
-                    value={formData.displayName}
-                    onChange={(e) => handleInputChange('displayName', e.target.value)}
-                    className="text-2xl font-bold"
-                  />
-                ) : (
-                  <h1 className="text-2xl font-bold text-foreground">{profile.displayName}</h1>
-                )}
-                <p className="text-muted-foreground">@{profile.username}</p>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4" />
-                    <span>Joined {new Date(profile.joinedAt).toLocaleDateString()}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Activity className="h-4 w-4" />
-                    <span>Active {new Date(profile.lastActive).toLocaleDateString()}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex gap-2">
-                {isEditing ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleCancel}
-                      disabled={updateProfileMutation.isPending}
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleSave}
-                      disabled={updateProfileMutation.isPending}
-                    >
-                      <Save className="h-4 w-4 mr-2" />
-                      Save
-                    </Button>
-                  </>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={handleEdit}>
-                    <Edit3 className="h-4 w-4 mr-2" />
-                    Edit Profile
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {profileQuery.isError && (
+        <ErrorNotice
+          title="Could not refresh your profile. Showing the last loaded details."
+          error={profileQuery.error}
+          retryLabel="Retry loading profile"
+          onRetry={() => void profileQuery.refetch()}
+          isRetrying={profileQuery.isFetching}
+        />
+      )}
+
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <ProfileHeader
+          profile={profile}
+          isEditing={isEditing}
+          onEdit={startEditing}
+          editButtonRef={editButtonRef}
+        />
       </motion.div>
 
-      {/* Stats Cards */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="grid grid-cols-2 md:grid-cols-4 gap-4"
-      >
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{profile.stats.totalScore.toLocaleString()}</div>
-              <p className="text-sm text-muted-foreground">Total Score</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">#{profile.stats.rank}</div>
-              <p className="text-sm text-muted-foreground">Global Rank</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{profile.stats.achievements}</div>
-              <p className="text-sm text-muted-foreground">Achievements</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{profile.stats.connections}</div>
-              <p className="text-sm text-muted-foreground">Connections</p>
-            </div>
-          </CardContent>
-        </Card>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+        <StatsSection profile={profile} />
       </motion.div>
 
-      {/* Tabs */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <Tabs value={activeTab} onValueChange={changeTab}>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="achievements">Achievements</TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
+            <TabsTrigger value="posts">Posts</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-6">
-            <Card>
+          {/* An open edit form stays mounted (hidden) on the other tabs, so what was typed is not lost. */}
+          <TabsContent
+            value="overview"
+            forceMount={isEditing || undefined}
+            hidden={activeTab !== 'overview'}
+            className="space-y-6"
+          >
+            <Card role="region" aria-labelledby="profile-about-heading">
               <CardHeader>
-                <CardTitle>About</CardTitle>
+                <CardTitle id="profile-about-heading">{isEditing ? 'Edit Profile' : 'About'}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {isEditing ? (
-                  <FormField
-                    label="Bio"
-                    value={formData.bio}
-                    onChange={(e) => handleInputChange('bio', e.target.value)}
-                    placeholder="Tell us about yourself..."
-                    type="textarea"
-                  />
+                  <EditProfileForm profile={profile} onDone={finishEditing} onCancel={() => finishEditing(null)} />
                 ) : (
-                  <p className="text-muted-foreground">
-                    {profile.bio || 'No bio provided yet.'}
-                  </p>
+                  <AboutDetails profile={profile} />
                 )}
-
-                <Separator />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Location</label>
-                    {isEditing ? (
-                      <FormField
-                        value={formData.location}
-                        onChange={(e) => handleInputChange('location', e.target.value)}
-                        placeholder="City, Country"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 mt-1">
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                        <span>{profile.location || 'Not specified'}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Website</label>
-                    {isEditing ? (
-                      <FormField
-                        value={formData.website}
-                        onChange={(e) => handleInputChange('website', e.target.value)}
-                        placeholder="https://yourwebsite.com"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 mt-1">
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                        {profile.website ? (
-                          <a
-                            href={profile.website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            {profile.website}
-                          </a>
-                        ) : (
-                          <span>Not specified</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                {/* Always mounted so screen readers announce the confirmation when it appears. */}
+                <div role="status" className={notice ? 'text-sm text-green-600' : 'sr-only'}>
+                  {notice}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="achievements" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-primary" />
-                  Achievements ({profile.achievements.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {profile.achievements.map((achievement) => (
-                    <motion.div
-                      key={achievement.id}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      whileHover={{ scale: 1.02 }}
-                      className="p-4 border rounded-lg bg-card hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={cn(
-                          'p-2 rounded-lg',
-                          getRarityColor(achievement.rarity)
-                        )}>
-                          {getAchievementIcon(achievement.iconName)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-foreground">{achievement.name}</h3>
-                          <p className="text-sm text-muted-foreground">{achievement.description}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            <Badge variant="outline" className={cn('text-xs', getRarityColor(achievement.rarity))}>
-                              {achievement.rarity}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(achievement.earnedAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="activity" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-primary" />
-                  Recent Activity
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <TrendingUp className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Activity tracking coming soon!</p>
-                </div>
-              </CardContent>
-            </Card>
+          <TabsContent value="posts" className="space-y-6">
+            <RecentPostsCard userId={profile.user_id} />
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-primary" />
-                  Privacy Settings
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Profile Visibility</label>
-                    <p className="text-sm text-muted-foreground">Who can see your profile</p>
-                  </div>
-                  <select
-                    value={profile.settings.privacy.profileVisibility}
-                    onChange={(e) => handleSettingChange('privacy', 'profileVisibility', e.target.value)}
-                    className="border rounded-md px-3 py-1"
-                  >
-                    <option value="public">Public</option>
-                    <option value="friends">Friends Only</option>
-                    <option value="private">Private</option>
-                  </select>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Show Email</label>
-                    <p className="text-sm text-muted-foreground">Display email on profile</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.privacy.showEmail}
-                    onCheckedChange={(checked) => handleSettingChange('privacy', 'showEmail', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Show Activity</label>
-                    <p className="text-sm text-muted-foreground">Display recent activity</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.privacy.showActivity}
-                    onCheckedChange={(checked) => handleSettingChange('privacy', 'showActivity', checked)}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-primary" />
-                  Notification Settings
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Email Notifications</label>
-                    <p className="text-sm text-muted-foreground">Receive updates via email</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.notifications.email}
-                    onCheckedChange={(checked) => handleSettingChange('notifications', 'email', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Push Notifications</label>
-                    <p className="text-sm text-muted-foreground">Receive browser notifications</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.notifications.push}
-                    onCheckedChange={(checked) => handleSettingChange('notifications', 'push', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Achievement Alerts</label>
-                    <p className="text-sm text-muted-foreground">Notify when you earn achievements</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.notifications.achievements}
-                    onCheckedChange={(checked) => handleSettingChange('notifications', 'achievements', checked)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-medium">Social Updates</label>
-                    <p className="text-sm text-muted-foreground">Notify about social interactions</p>
-                  </div>
-                  <Switch
-                    checked={profile.settings.notifications.social}
-                    onCheckedChange={(checked) => handleSettingChange('notifications', 'social', checked)}
-                  />
-                </div>
-              </CardContent>
-            </Card>
+            <PrivacyCard profile={profile} update={privacyUpdate} />
+            <ChangePasswordCard />
           </TabsContent>
         </Tabs>
       </motion.div>

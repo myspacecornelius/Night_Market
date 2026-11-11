@@ -1,11 +1,26 @@
 import axios from 'axios';
-import type { AxiosInstance, AxiosResponse } from 'axios';
+import type { AxiosInstance} from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import {
+  API_BASE_URL,
+  clearTokens,
+  endSession,
+  getAccessToken,
+  refreshAccessToken,
+  storeTokens,
+} from '@/lib/auth-tokens';
 
 export interface AuthTokens {
   access_token: string;
+  refresh_token?: string;
   token_type: string;
+}
+
+export interface RegisterData {
+  username: string;
+  email: string;
+  password: string;
+  display_name: string;
 }
 
 export interface User {
@@ -59,9 +74,53 @@ export interface LacesTransaction {
   created_at: string;
 }
 
+export interface DashboardMetrics {
+  lacesBalance: number;
+  lacesEarnedToday: number;
+  lacesEarnedThisWeek: number;
+  lacesEarnedLastWeek: number;
+  /** Percent change in LACES earned versus the previous 7 days; null when there is no baseline. */
+  weeklyGrowth: number | null;
+  activeSignals: number;
+  nearbyActivity: number | null;
+  communityRank: number;
+  totalUsers: number;
+  totalViews: number;
+  signalsPosted: number;
+  checkIns: number;
+  updatedAt: string;
+}
+
+export interface DashboardActivityItem {
+  id: string;
+  type: 'signal';
+  postType: Post['post_type'];
+  message: string | null;
+  createdAt: string;
+  boostScore: number;
+  views: number;
+  replies: number;
+  isOwn: boolean;
+  user: { username: string; avatar: string | null };
+}
+
+export interface DashboardActivity {
+  items: DashboardActivityItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  filter: string;
+}
+
+export interface DashboardTimeseriesPoint {
+  date: string;
+  signals: number;
+  posts: number;
+  laces: number;
+}
+
 class ApiClient {
   private client: AxiosInstance;
-  private authToken: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -73,20 +132,29 @@ class ApiClient {
 
     // Request interceptor for auth
     this.client.interceptors.request.use((config) => {
-      const token = this.getAuthToken();
+      const token = getAccessToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
     });
 
-    // Response interceptor for error handling
+    // Response interceptor: on 401 renew the session once and retry, otherwise end it
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          this.clearAuthToken();
-          window.location.href = '/login';
+      async (error) => {
+        const original = error.config;
+        const isAuthCall = typeof original?.url === 'string' && original.url.startsWith('/auth/token');
+        if (error.response?.status === 401 && original && !isAuthCall) {
+          if (!original._retried) {
+            original._retried = true;
+            const renewed = await refreshAccessToken();
+            if (renewed) {
+              original.headers.Authorization = `Bearer ${renewed}`;
+              return this.client(original);
+            }
+          }
+          endSession();
         }
         return Promise.reject(error);
       }
@@ -103,7 +171,21 @@ class ApiClient {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
 
-    this.setAuthToken(response.data.access_token);
+    storeTokens(response.data);
+    return response.data;
+  }
+
+  async register(data: RegisterData): Promise<User> {
+    const response = await this.client.post<User>('/auth/register', data);
+    return response.data;
+  }
+
+  /** Change the signed-in user's password; their other sessions are ended by the server. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string; other_sessions_ended: number }> {
+    const response = await this.client.post('/auth/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
     return response.data;
   }
 
@@ -143,7 +225,7 @@ class ApiClient {
 
   // Signal methods (hyperlocal)
   async createHyperlocalSignal(data: CreatePostData): Promise<Post> {
-    const response = await this.client.post<Post>('/v1/signals', data);
+    const response = await this.client.post<Post>('/v1/hyperlocal/signals', data);
     return response.data;
   }
 
@@ -159,7 +241,7 @@ class ApiClient {
   }
 
   async boostPost(postId: string): Promise<User> {
-    const response = await this.client.post<User>(`/v1/signals/${postId}/boost`);
+    const response = await this.client.post<User>(`/v1/hyperlocal/signals/${postId}/boost`);
     return response.data;
   }
 
@@ -208,6 +290,27 @@ class ApiClient {
     return response.data;
   }
 
+  // Dashboard methods
+  async getDashboardMetrics(): Promise<DashboardMetrics> {
+    const response = await this.client.get<DashboardMetrics>('/v1/dashboard/metrics');
+    return response.data;
+  }
+
+  async getDashboardActivity(limit: number = 10): Promise<DashboardActivity> {
+    const response = await this.client.get<DashboardActivity>('/v1/dashboard/activity', {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  async getDashboardTimeseries(days: number): Promise<DashboardTimeseriesPoint[]> {
+    const response = await this.client.get<{ days: number; points: DashboardTimeseriesPoint[] }>(
+      '/v1/dashboard/timeseries',
+      { params: { days } },
+    );
+    return response.data.points;
+  }
+
   // Health check
   async healthCheck() {
     try {
@@ -218,26 +321,20 @@ class ApiClient {
     }
   }
 
-  // Token management
-  private setAuthToken(token: string) {
-    this.authToken = token;
-    localStorage.setItem('auth_token', token);
-  }
-
-  private getAuthToken(): string | null {
-    if (!this.authToken) {
-      this.authToken = localStorage.getItem('auth_token');
-    }
-    return this.authToken;
-  }
-
-  private clearAuthToken() {
-    this.authToken = null;
-    localStorage.removeItem('auth_token');
-  }
-
+  /** End the session on the server (best effort) and forget the tokens. */
   logout() {
-    this.clearAuthToken();
+    const token = getAccessToken();
+    clearTokens();
+    if (token) {
+      // Sent with the token read above. Going through the shared client did not work:
+      // its request interceptor reads the stored token after this function has
+      // returned, when it is already gone, so the server was never told.
+      void fetch(`${API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true, // let it finish while the page moves to the login screen
+      }).catch(() => undefined);
+    }
   }
 }
 

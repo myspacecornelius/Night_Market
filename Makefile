@@ -43,8 +43,11 @@ doctor:
 setup:
 	@echo "⚙️ Setting up Dharma development environment..."
 	@if [ ! -f .env ]; then \
-		echo "📋 Copying .env.example to .env..."; \
-		cp .env.example .env; \
+		echo "📋 Creating .env from .env.example with a private JWT secret..."; \
+		secret=$$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))"); \
+		test -n "$$secret" || { echo "❌ Could not generate a JWT secret (need openssl or python3)"; exit 1; }; \
+		grafana=$$(openssl rand -hex 12 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(12))"); \
+		awk -v secret="$$secret" -v grafana="$$grafana" '/^JWT_SECRET_KEY=/ { print "JWT_SECRET_KEY=" secret; next } /^GRAFANA_ADMIN_PASSWORD=/ { print "GRAFANA_ADMIN_PASSWORD=" grafana; next } { print }' .env.example > .env; \
 		echo "✅ Created .env file"; \
 		echo "💡 Edit .env if you need custom configuration"; \
 	else \
@@ -95,7 +98,7 @@ migrate:
 # Seed demo data
 seed:
 	@echo "🌱 Seeding demo data..."
-	@docker compose exec api python -m backend.seed
+	@docker compose exec api python -m services.seed
 	@echo "✅ Demo data populated"
 
 # Run tests
@@ -103,18 +106,18 @@ test:
 	@echo "🧪 Running Dharma test suite..."
 	@if [ -f frontend/package.json ]; then \
 		echo "Testing frontend..."; \
-		cd frontend && npm test; \
+		(cd frontend && npm test -- --run); \
 	fi
-	@if [ -f backend/requirements.txt ]; then \
+	@if [ -f requirements.txt ]; then \
 		echo "Testing backend..."; \
-		docker compose exec api python -m pytest tests/ -v; \
+		docker compose exec postgres sh -c 'createdb -U "$$POSTGRES_USER" dharma_test 2>/dev/null || true'; \
+		docker compose exec -w /app api sh -c 'TEST_DATABASE_URL="postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/dharma_test" python -m pytest -v'; \
 	fi
 
 # Clean up containers and volumes
 clean:
 	@echo "🧹 Cleaning up Docker resources..."
 	@docker compose down -v --remove-orphans
-	@docker system prune -f
 	@echo "✅ Cleanup complete"
 
 # Full reset - nuclear option

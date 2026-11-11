@@ -1,11 +1,20 @@
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+import logging
 import time
 import redis
 
-from services.core.rate_limiting import RateLimiter, get_rate_limit_config
+from services.core.rate_limiting import RateLimiter, get_rate_limit_for_request
+
+logger = logging.getLogger("dharma.rate_limit")
+
+
+# After Redis fails, requests are let through without asking it again for this long.
+# Otherwise every request would wait for the socket timeout before failing open.
+REDIS_RETRY_AFTER_SECONDS = 5.0
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -14,24 +23,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp, redis_client: redis.Redis):
         super().__init__(app)
         self.limiter = RateLimiter(redis_client)
+        self._skip_until = 0.0
     
     async def dispatch(self, request: Request, call_next):
         """Apply rate limiting to requests"""
         # Skip rate limiting for health checks and static files
-        if request.url.path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
+        if request.url.path in ["/health", "/health/ready", "/metrics", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
         
         # Skip rate limiting for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
             return await call_next(request)
         
-        # Get rate limit configuration for this route
-        route = request.url.path
-        config = get_rate_limit_config(route)
-        
+        # Redis failed a moment ago: let requests through until it has had time to recover
+        if time.monotonic() < self._skip_until:
+            return await call_next(request)
+
         # Check rate limit
         try:
-            rate_info = self.limiter.check_rate_limit(
+            # The limit for this HTTP method on this exact route (not a path prefix).
+            # Per-user limits are counted against the user in the bearer token.
+            route, config = get_rate_limit_for_request(request)
+            
+            # The Redis client blocks, so the check runs in a worker thread: on the event
+            # loop, one request waiting for Redis held up every other request too.
+            rate_info = await run_in_threadpool(
+                self.limiter.check_rate_limit,
                 request=request,
                 route=route,
                 max_requests=config["max_requests"],
@@ -63,8 +80,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             
         except Exception as e:
             # If rate limiting fails, log error but don't block request
-            print(f"Rate limiting error: {e}")
-            pass
+            logger.warning("Rate limiting error: %s", e)
+            self._skip_until = time.monotonic() + REDIS_RETRY_AFTER_SECONDS
         
         # Process the request
         response = await call_next(request)

@@ -1,5 +1,4 @@
 
-import React from 'react';
 import QuestCard from '@/components/hyperlocal/QuestCard';
 import { quests } from '@/mocks/quests';
 

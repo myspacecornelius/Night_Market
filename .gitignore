@@ -65,10 +65,12 @@ celerybeat.pid
 /out
 
 # Dependency directories
-/node_modules
+node_modules/
 
 # Test outputs
 /coverage
+coverage.xml
+.coverage
 
 # Next.js specific
 /.next/
