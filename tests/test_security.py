@@ -266,6 +266,11 @@ def test_nul_bytes_nan_and_huge_passwords_are_client_errors(client, db_session, 
     nan = client.post("/v1/dropzones", content=nan_body, headers={**headers, "Content-Type": "application/json"})
     assert nan.status_code == 422
 
+    # a lone surrogate is rejected by validation, and the rejection itself must be serialisable
+    surrogate_body = '{"name": "\\ud800", "center_lat": 91, "center_lng": 1}'
+    surrogate = client.post("/v1/dropzones", content=surrogate_body, headers={**headers, "Content-Type": "application/json"})
+    assert surrogate.status_code == 422
+
 
 def test_rate_limited_and_failed_responses_keep_cors_and_security_headers(client, monkeypatch):
     from fastapi import APIRouter

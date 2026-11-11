@@ -135,11 +135,14 @@ async def value_error_handler(request: Request, exc: ValueError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
-    # The default handler echoes the rejected input; NaN or Infinity in it cannot be
-    # serialised as JSON and turned a 422 into a 500. Echo such values as text.
+    # The default handler echoes the rejected input. NaN, Infinity or a lone surrogate
+    # ("\ud800") in it cannot be serialised as JSON and turned a 422 into a 500. Echo
+    # such values in a form that can be.
     def safe(value):
         if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
             return str(value)
+        if isinstance(value, str):
+            return value.encode("utf-8", "backslashreplace").decode("utf-8")
         if isinstance(value, dict):
             return {key: safe(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):
