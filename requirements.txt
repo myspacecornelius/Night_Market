@@ -42,6 +42,9 @@ geohash2==1.1
 
 # Worker/Queue
 celery==5.3.4
+# Pinned with celery: kombu 5.7 needs redis>=6.1 and refuses the redis pinned above,
+# which stopped the worker and the scheduler at startup.
+kombu==5.3.7
 
 # Data generation
 faker==25.2.0

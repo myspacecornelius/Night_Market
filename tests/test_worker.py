@@ -116,3 +116,18 @@ def test_periodic_tasks_run_through_the_services(db_session, make_user, monkeypa
     db_session.expire_all()
     assert owner.laces_balance == 100
     assert zone.status == DropZoneStatus.ACTIVE
+
+
+def test_the_worker_can_open_its_broker_connection(monkeypatch):
+    """Creating Celery's Redis transport checks the installed redis client's version.
+
+    kombu was not pinned, and a new release required a newer redis client than the
+    pinned one: the worker and the scheduler crashed at startup on a fresh install,
+    while everything that only imported the tasks kept working.
+    """
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)  # would override worker.celeryconfig
+    from worker.tasks import app
+
+    with app.connection_for_write() as connection:
+        connection.ensure_connection(max_retries=1, timeout=5)
+        assert connection.default_channel is not None  # this is where the version check runs
