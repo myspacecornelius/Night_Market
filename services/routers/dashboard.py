@@ -1,34 +1,23 @@
+"""Dashboard endpoints: per-user metrics, activity feed, time series, leaderboards.
+
+Everything here is computed from the real tables (users, posts, locations,
+laces_ledger, dropzone_checkins); nothing is estimated or randomised.
+"""
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
-import logging
-from datetime import datetime, timedelta
-import json
-import random
-from math import cos, pi
+from geoalchemy2 import Geography
+from sqlalchemy import cast, func
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
 
-try:
-    from ..database import get_db
-    from ..models import user as user_model
-    from ..models import post as post_model
-    from ..models import dropzone as dropzone_model
-    from ..models import laces as laces_model
-    from ..models import location as location_model
-    from ..schemas import auth as auth_schemas
-    from ..core.security import get_current_user
-except ImportError:
-    from database import get_db
-    from models import user as user_model
-    from models import post as post_model
-    from models import dropzone as dropzone_model
-    from models import laces as laces_model
-    from models import location as location_model
-    from schemas import auth as auth_schemas
-    from core.security import get_current_user
-
-# Configure logging
-logger = logging.getLogger(__name__)
+from services.core.auth import get_current_active_user
+from services.database import get_db
+from services.models.dropzone import DropZoneCheckIn
+from services.models.laces import LacesLedger
+from services.models.location import Location
+from services.models.post import Post
+from services.models.user import User
 
 router = APIRouter(
     prefix="/dashboard",
@@ -36,382 +25,253 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+ACTIVE_WINDOW = timedelta(hours=24)
+MAX_RADIUS_KM = 100.0
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _start_of_utc_day(moment: datetime) -> datetime:
+    return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _near(lat: float, lng: float, radius_km: float):
+    """Filter clause: location within ``radius_km`` of the point."""
+    point = cast(func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), Geography)
+    return func.ST_DWithin(Location.point, point, radius_km * 1000)
+
+
+def _laces_earned(db: Session, user_id, start: datetime, end: Optional[datetime] = None) -> int:
+    query = db.query(func.coalesce(func.sum(LacesLedger.amount), 0)).filter(
+        LacesLedger.user_id == user_id,
+        LacesLedger.amount > 0,
+        LacesLedger.created_at >= start,
+    )
+    if end is not None:
+        query = query.filter(LacesLedger.created_at < end)
+    return int(query.scalar())
+
+
+def _public_name(user: User) -> Dict[str, Optional[str]]:
+    """How a user appears to other people, honouring the anonymous flag."""
+    if user.is_anonymous:
+        return {"username": "anonymous", "avatar": None}
+    return {"username": user.username, "avatar": user.avatar_url}
+
+
 @router.get("/metrics")
-async def get_dashboard_metrics(
-    current_user: auth_schemas.User = Depends(get_current_user),
+def get_dashboard_metrics(
+    lat: Optional[float] = Query(None, ge=-90, le=90, description="Latitude for nearby activity"),
+    lng: Optional[float] = Query(None, ge=-180, le=180, description="Longitude for nearby activity"),
+    radius_km: float = Query(5.0, gt=0, le=MAX_RADIUS_KM),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-):
-    """
-    Get personalized dashboard metrics for the current user
-    """
-    try:
-        # Get user's LACES balance
-        laces_balance = db.query(func.sum(laces_model.Transaction.amount)).filter(
-            laces_model.Transaction.user_id == current_user.id
-        ).scalar() or 0
-        
-        # Get laces earned today
-        today = datetime.now().date()
-        laces_earned_today = db.query(func.sum(laces_model.Transaction.amount)).filter(
-            laces_model.Transaction.user_id == current_user.id,
-            laces_model.Transaction.amount > 0,
-            func.date(laces_model.Transaction.created_at) == today
-        ).scalar() or 0
-        
-        # Count active signals (posts within the last 24 hours)
-        last_24h = datetime.now() - timedelta(hours=24)
-        active_signals = db.query(post_model.Post).filter(
-            post_model.Post.created_at >= last_24h,
-            post_model.Post.is_active == True
-        ).count()
-        
-        # Get nearby activity - posts near user's last known location
-        user_location = db.query(location_model.UserLocation).filter(
-            location_model.UserLocation.user_id == current_user.id
-        ).order_by(location_model.UserLocation.timestamp.desc()).first()
-        
-        nearby_activity = 0
-        if user_location:
-            # This is a simplification - in reality you'd use geospatial queries
-            # to find posts within a certain radius of the user's location
-            nearby_activity = db.query(post_model.Post).filter(
-                post_model.Post.created_at >= last_24h,
-                post_model.Post.latitude.between(user_location.latitude - 0.1, user_location.latitude + 0.1),
-                post_model.Post.longitude.between(user_location.longitude - 0.1, user_location.longitude + 0.1)
-            ).count()
-        
-        # Get community rank (simplified - just based on LACES balance)
-        # In a real app, this would be a more complex calculation
-        user_rank = db.query(func.count(user_model.User.id)).filter(
-            user_model.User.id != current_user.id,
-            # Count users with higher LACES balance
-            user_model.User.id.in_(
-                db.query(laces_model.Transaction.user_id).group_by(
-                    laces_model.Transaction.user_id
-                ).having(
-                    func.sum(laces_model.Transaction.amount) > laces_balance
-                )
-            )
-        ).scalar() + 1  # Add 1 to get rank (1-based)
-        
-        # Get profile views
-        profile_views = current_user.profile_views or 0
-        
-        # Weekly growth (dummy calculation for now)
-        # In a real app, you'd compare to last week's metrics
-        weekly_growth = random.uniform(5.0, 15.0)
-        
-        # Signals posted by the user
-        signals_posted = db.query(post_model.Post).filter(
-            post_model.Post.user_id == current_user.id
-        ).count()
-        
-        # Network size (simplified - just followers and following)
-        network_size = db.query(user_model.UserFollower).filter(
-            (user_model.UserFollower.follower_id == current_user.id) | 
-            (user_model.UserFollower.user_id == current_user.id)
-        ).count()
-        
-        return {
-            "lacesBalance": laces_balance,
-            "lacesEarnedToday": laces_earned_today,
-            "activeSignals": active_signals,
-            "nearbyActivity": nearby_activity,
-            "communityRank": user_rank,
-            "totalViews": profile_views,
-            "weeklyGrowth": round(weekly_growth, 1),
-            "signalsPosted": signals_posted,
-            "networkSize": network_size,
-            "updatedAt": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error getting dashboard metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting dashboard metrics: {str(e)}")
+) -> Dict[str, Any]:
+    """Personal dashboard metrics for the current user."""
+    now = _utcnow()
+    today = _start_of_utc_day(now)
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+    active_since = now - ACTIVE_WINDOW
+
+    recent_public_posts = db.query(func.count(Post.post_id)).filter(
+        Post.timestamp >= active_since,
+        Post.visibility == "public",
+        Post.is_archived.is_(False),
+    )
+
+    nearby_activity = None
+    if lat is not None and lng is not None:
+        nearby_activity = (
+            recent_public_posts.join(Location, Location.id == Post.location_id)
+            .filter(_near(lat, lng, radius_km))
+            .scalar()
+        )
+
+    earned_this_week = _laces_earned(db, current_user.user_id, week_ago)
+    earned_last_week = _laces_earned(db, current_user.user_id, two_weeks_ago, week_ago)
+    weekly_growth = None
+    if earned_last_week > 0:
+        weekly_growth = round((earned_this_week - earned_last_week) / earned_last_week * 100, 1)
+
+    users_ahead = db.query(func.count(User.user_id)).filter(
+        User.is_active.is_(True),
+        User.laces_balance > current_user.laces_balance,
+    ).scalar()
+
+    signals_posted, total_views = db.query(
+        func.count(Post.post_id), func.coalesce(func.sum(Post.view_count), 0)
+    ).filter(Post.user_id == current_user.user_id).one()
+
+    return {
+        "lacesBalance": current_user.laces_balance,
+        "lacesEarnedToday": _laces_earned(db, current_user.user_id, today),
+        "lacesEarnedThisWeek": earned_this_week,
+        "lacesEarnedLastWeek": earned_last_week,
+        "weeklyGrowth": weekly_growth,
+        "activeSignals": recent_public_posts.scalar(),
+        "nearbyActivity": nearby_activity,
+        "communityRank": users_ahead + 1,
+        "totalUsers": db.query(func.count(User.user_id)).filter(User.is_active.is_(True)).scalar(),
+        "totalViews": int(total_views),
+        "signalsPosted": signals_posted,
+        "checkIns": db.query(func.count(DropZoneCheckIn.id))
+        .filter(DropZoneCheckIn.user_id == current_user.user_id)
+        .scalar(),
+        "updatedAt": now.isoformat(),
+    }
+
 
 @router.get("/activity")
-async def get_activity_feed(
+def get_activity_feed(
     limit: int = Query(10, ge=1, le=50),
     offset: int = Query(0, ge=0),
-    filter: Optional[str] = None,
-    current_user: auth_schemas.User = Depends(get_current_user),
+    filter: str = Query("global", pattern="^(global|mine|nearby)$"),
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lng: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: float = Query(5.0, gt=0, le=MAX_RADIUS_KM),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-):
-    """
-    Get activity feed with various filters:
-    - global: all activity
-    - friends: activity from followed users
-    - nearby: activity near user's location
-    - type: filter by activity type (post, laces, community)
-    """
-    try:
-        last_24h = datetime.now() - timedelta(hours=24)
-        
-        # Base query for posts
-        query = db.query(
-            post_model.Post,
-            user_model.User.username,
-            user_model.User.avatar_url
-        ).join(
-            user_model.User, 
-            post_model.Post.user_id == user_model.User.id
-        ).filter(
-            post_model.Post.created_at >= last_24h
-        )
-        
-        # Apply filters
-        if filter == "friends":
-            # Get posts from users that the current user follows
-            followed_users = db.query(user_model.UserFollower.user_id).filter(
-                user_model.UserFollower.follower_id == current_user.id
-            ).all()
-            followed_user_ids = [user_id for (user_id,) in followed_users]
-            query = query.filter(post_model.Post.user_id.in_(followed_user_ids))
-        elif filter == "nearby":
-            # Get posts near the user's last location
-            user_location = db.query(location_model.UserLocation).filter(
-                location_model.UserLocation.user_id == current_user.id
-            ).order_by(location_model.UserLocation.timestamp.desc()).first()
-            
-            if user_location:
-                # Simplified geospatial filtering
-                query = query.filter(
-                    post_model.Post.latitude.between(user_location.latitude - 0.1, user_location.latitude + 0.1),
-                    post_model.Post.longitude.between(user_location.longitude - 0.1, user_location.longitude + 0.1)
-                )
-        
-        # Order by most recent
-        query = query.order_by(desc(post_model.Post.created_at))
-        
-        # Apply pagination
-        posts = query.offset(offset).limit(limit).all()
-        
-        # Format the activity items
-        activity_items = []
-        for post, username, avatar_url in posts:
-            # Determine if the post is urgent based on some criteria
-            # In a real app, this would be a more complex calculation
-            is_urgent = post.upvotes > 5 if post.upvotes else False
-            
-            # Calculate how long ago the post was created
-            time_diff = datetime.now() - post.created_at
-            if time_diff.days > 0:
-                time_ago = f"{time_diff.days}d ago"
-            elif time_diff.seconds // 3600 > 0:
-                time_ago = f"{time_diff.seconds // 3600}h ago"
-            else:
-                time_ago = f"{time_diff.seconds // 60}m ago"
-            
-            activity_items.append({
-                "id": post.id,
-                "type": "signal",  # For now, only posts are supported
-                "message": post.content,
-                "time": time_ago,
-                "urgent": is_urgent,
-                "user": {
-                    "username": username,
-                    "avatar": avatar_url
-                }
-            })
-        
-        return {
-            "items": activity_items,
-            "total": query.count(),
-            "offset": offset,
-            "limit": limit,
-            "filter": filter
-        }
-    except Exception as e:
-        logger.error(f"Error getting activity feed: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting activity feed: {str(e)}")
+) -> Dict[str, Any]:
+    """Recent posts: everyone's public posts, the caller's own, or public posts nearby."""
+    query = db.query(Post, User).join(User, User.user_id == Post.user_id).filter(Post.is_archived.is_(False))
 
-@router.get("/heatmap")
-async def get_heatmap_data(
-    lat: float = Query(..., description="Center latitude"),
-    lng: float = Query(..., description="Center longitude"),
-    radius: float = Query(10.0, description="Radius in kilometers"),
-    current_user: auth_schemas.User = Depends(get_current_user),
+    if filter == "mine":
+        query = query.filter(Post.user_id == current_user.user_id)
+    else:
+        query = query.filter(Post.visibility == "public")
+        if filter == "nearby":
+            if lat is None or lng is None:
+                raise HTTPException(status_code=400, detail="lat and lng are required for filter=nearby")
+            query = query.join(Location, Location.id == Post.location_id).filter(_near(lat, lng, radius_km))
+
+    total = query.count()
+    rows = query.order_by(Post.timestamp.desc(), Post.post_id).offset(offset).limit(limit).all()
+
+    items = []
+    for post, author in rows:
+        is_own = author.user_id == current_user.user_id
+        user = {"username": author.username, "avatar": author.avatar_url} if is_own else _public_name(author)
+        items.append(
+            {
+                "id": str(post.post_id),
+                "type": "signal",
+                "postType": post.post_type,
+                "message": post.content_text,
+                "createdAt": post.timestamp.isoformat(),
+                "boostScore": post.boost_score,
+                "views": post.view_count,
+                "replies": post.reply_count,
+                "isOwn": is_own,
+                "user": user,
+            }
+        )
+
+    return {"items": items, "total": total, "offset": offset, "limit": limit, "filter": filter}
+
+
+@router.get("/timeseries")
+def get_activity_timeseries(
+    days: int = Query(7, ge=1, le=90),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-):
-    """
-    Get heatmap data for a specific area
-    """
-    try:
-        # This is a simplified implementation - in a real app,
-        # you'd use a proper geospatial database query
-        
-        # Get dropzones in the area
-        dropzones = db.query(
-            dropzone_model.Dropzone,
-            func.count(post_model.Post.id).label('post_count')
-        ).outerjoin(
-            post_model.Post,
-            dropzone_model.Dropzone.id == post_model.Post.dropzone_id
-        ).filter(
-            dropzone_model.Dropzone.latitude.between(lat - radius/111.0, lat + radius/111.0),
-            dropzone_model.Dropzone.longitude.between(lng - radius/(111.0 * cos(lat * pi/180)), lng + radius/(111.0 * cos(lat * pi/180)))
-        ).group_by(
-            dropzone_model.Dropzone.id
-        ).all()
-        
-        # Format the heatmap points
-        heatmap_points = []
-        for dropzone, post_count in dropzones:
-            # Calculate intensity based on post count
-            intensity = min(1.0, post_count / 10.0) if post_count else 0.3
-            
-            heatmap_points.append({
-                "id": dropzone.id,
-                "lat": dropzone.latitude,
-                "lng": dropzone.longitude,
-                "intensity": intensity,
-                "type": "dropzone",
-                "name": dropzone.name,
-                "postCount": post_count
-            })
-        
-        # Get posts in the area that aren't associated with a dropzone
-        standalone_posts = db.query(post_model.Post).filter(
-            post_model.Post.dropzone_id == None,
-            post_model.Post.latitude.between(lat - radius/111.0, lat + radius/111.0),
-            post_model.Post.longitude.between(lng - radius/(111.0 * cos(lat * pi/180)), lng + radius/(111.0 * cos(lat * pi/180)))
-        ).all()
-        
-        # Add standalone posts to the heatmap
-        for post in standalone_posts:
-            heatmap_points.append({
-                "id": f"post_{post.id}",
-                "lat": post.latitude,
-                "lng": post.longitude,
-                "intensity": 0.4,  # Lower intensity for standalone posts
-                "type": "post",
-                "content": post.content
-            })
-        
-        return {
-            "points": heatmap_points,
-            "center": {"lat": lat, "lng": lng},
-            "radius": radius
-        }
-    except Exception as e:
-        logger.error(f"Error getting heatmap data: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting heatmap data: {str(e)}")
+) -> Dict[str, Any]:
+    """Per-day (UTC) series: community public posts, and the caller's posts and LACES earned."""
+    today = _utcnow().date()
+    first_day = today - timedelta(days=days - 1)
+    since = datetime.combine(first_day, datetime.min.time(), tzinfo=timezone.utc)
+
+    post_day = func.date(func.timezone("UTC", Post.timestamp))
+    community = dict(
+        db.query(post_day, func.count(Post.post_id))
+        .filter(Post.timestamp >= since, Post.visibility == "public", Post.is_archived.is_(False))
+        .group_by(post_day)
+        .all()
+    )
+    own_posts = dict(
+        db.query(post_day, func.count(Post.post_id))
+        .filter(Post.timestamp >= since, Post.user_id == current_user.user_id)
+        .group_by(post_day)
+        .all()
+    )
+    ledger_day = func.date(func.timezone("UTC", LacesLedger.created_at))
+    earned = dict(
+        db.query(ledger_day, func.sum(LacesLedger.amount))
+        .filter(
+            LacesLedger.created_at >= since,
+            LacesLedger.user_id == current_user.user_id,
+            LacesLedger.amount > 0,
+        )
+        .group_by(ledger_day)
+        .all()
+    )
+
+    points: List[Dict[str, Any]] = []
+    for offset in range(days):
+        day: date = first_day + timedelta(days=offset)
+        points.append(
+            {
+                "date": day.isoformat(),
+                "signals": community.get(day, 0),
+                "posts": own_posts.get(day, 0),
+                "laces": int(earned.get(day, 0)),
+            }
+        )
+    return {"days": days, "points": points}
+
+
+LEADERBOARDS = {
+    "laces": {"title": "LACES Leaderboard", "subtitle": "Top LACES holders in the community", "unit": "LACES"},
+    "posts": {"title": "Signal Leaders", "subtitle": "Most active community members", "unit": "signals"},
+    "checkins": {"title": "Drop Hunters", "subtitle": "Most check-ins at drop zones", "unit": "check-ins"},
+}
+
 
 @router.get("/leaderboard")
-async def get_leaderboard(
-    type: str = Query("laces", description="Leaderboard type: laces, posts, drops"),
+def get_leaderboard(
+    type: str = Query("laces", pattern="^(laces|posts|checkins)$"),
     limit: int = Query(10, ge=1, le=50),
-    current_user: auth_schemas.User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-):
-    """
-    Get leaderboard data by different metrics
-    """
-    try:
-        if type == "laces":
-            # Get users with highest LACES balance
-            leaders = db.query(
-                user_model.User,
-                func.sum(laces_model.Transaction.amount).label('balance')
-            ).join(
-                laces_model.Transaction,
-                user_model.User.id == laces_model.Transaction.user_id
-            ).group_by(
-                user_model.User.id
-            ).order_by(
-                desc('balance')
-            ).limit(limit).all()
-            
-            leaderboard_items = [
-                {
-                    "rank": i + 1,
-                    "userId": user.id,
-                    "username": user.username,
-                    "avatar": user.avatar_url,
-                    "value": balance,
-                    "isCurrentUser": user.id == current_user.id
-                }
-                for i, (user, balance) in enumerate(leaders)
-            ]
-            
-            return {
-                "type": "laces",
-                "title": "LACES Leaderboard",
-                "subtitle": "Top LACES holders in the community",
-                "items": leaderboard_items,
-                "unit": "LACES"
+) -> Dict[str, Any]:
+    """Top active users by LACES balance, posts, or drop-zone check-ins."""
+    if type == "laces":
+        value = User.laces_balance
+        query = db.query(User, value).filter(User.is_active.is_(True))
+    elif type == "posts":
+        value = func.count(Post.post_id)
+        query = (
+            db.query(User, value)
+            .join(Post, Post.user_id == User.user_id)
+            .filter(User.is_active.is_(True), Post.visibility == "public", Post.is_archived.is_(False))
+            .group_by(User.user_id)
+        )
+    else:
+        value = func.count(DropZoneCheckIn.id)
+        query = (
+            db.query(User, value)
+            .join(DropZoneCheckIn, DropZoneCheckIn.user_id == User.user_id)
+            .filter(User.is_active.is_(True))
+            .group_by(User.user_id)
+        )
+
+    leaders = query.order_by(value.desc(), User.username).limit(limit).all()
+
+    items = []
+    for rank, (user, amount) in enumerate(leaders, start=1):
+        is_current = user.user_id == current_user.user_id
+        shown = {"username": user.username, "avatar": user.avatar_url} if is_current else _public_name(user)
+        items.append(
+            {
+                "rank": rank,
+                "userId": None if (user.is_anonymous and not is_current) else str(user.user_id),
+                "username": shown["username"],
+                "avatar": shown["avatar"],
+                "value": int(amount),
+                "isCurrentUser": is_current,
             }
-            
-        elif type == "posts":
-            # Get users with most posts
-            leaders = db.query(
-                user_model.User,
-                func.count(post_model.Post.id).label('post_count')
-            ).join(
-                post_model.Post,
-                user_model.User.id == post_model.Post.user_id
-            ).group_by(
-                user_model.User.id
-            ).order_by(
-                desc('post_count')
-            ).limit(limit).all()
-            
-            leaderboard_items = [
-                {
-                    "rank": i + 1,
-                    "userId": user.id,
-                    "username": user.username,
-                    "avatar": user.avatar_url,
-                    "value": post_count,
-                    "isCurrentUser": user.id == current_user.id
-                }
-                for i, (user, post_count) in enumerate(leaders)
-            ]
-            
-            return {
-                "type": "posts",
-                "title": "Signal Leaders",
-                "subtitle": "Most active community members",
-                "items": leaderboard_items,
-                "unit": "signals"
-            }
-            
-        elif type == "drops":
-            # Get users who have attended the most drops
-            leaders = db.query(
-                user_model.User,
-                func.count(dropzone_model.DropzoneAttendee.id).label('drop_count')
-            ).join(
-                dropzone_model.DropzoneAttendee,
-                user_model.User.id == dropzone_model.DropzoneAttendee.user_id
-            ).group_by(
-                user_model.User.id
-            ).order_by(
-                desc('drop_count')
-            ).limit(limit).all()
-            
-            leaderboard_items = [
-                {
-                    "rank": i + 1,
-                    "userId": user.id,
-                    "username": user.username,
-                    "avatar": user.avatar_url,
-                    "value": drop_count,
-                    "isCurrentUser": user.id == current_user.id
-                }
-                for i, (user, drop_count) in enumerate(leaders)
-            ]
-            
-            return {
-                "type": "drops",
-                "title": "Drop Hunters",
-                "subtitle": "Most active at drops and releases",
-                "items": leaderboard_items,
-                "unit": "drops"
-            }
-        
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid leaderboard type: {type}")
-            
-    except Exception as e:
-        logger.error(f"Error getting leaderboard: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting leaderboard: {str(e)}")
+        )
+
+    return {"type": type, "items": items, **LEADERBOARDS[type]}
