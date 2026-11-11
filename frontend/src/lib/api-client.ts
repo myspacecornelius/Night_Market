@@ -180,6 +180,15 @@ class ApiClient {
     return response.data;
   }
 
+  /** Change the signed-in user's password; their other sessions are ended by the server. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string; other_sessions_ended: number }> {
+    const response = await this.client.post('/auth/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  }
+
   async getCurrentUser(): Promise<User> {
     const response = await this.client.get<User>('/auth/me');
     return response.data;

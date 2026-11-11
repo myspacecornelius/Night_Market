@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import type { Location } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion } from 'framer-motion'
@@ -12,9 +12,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/hooks/useAuth'
 
+// The API signs in with either; the field keeps the name the auth hook expects.
 const formSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
+  email: z.string().trim().min(1, 'Enter your email or username'),
+  password: z.string().min(1, 'Enter your password'),
 })
 
 const LoginPage = () => {
@@ -56,7 +57,7 @@ const LoginPage = () => {
           <CardHeader>
             <CardTitle className="text-2xl">Login</CardTitle>
             <CardDescription>
-              Enter your username and password to access your account.
+              Enter your email or username and your password.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -67,9 +68,9 @@ const LoginPage = () => {
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email</FormLabel>
+                      <FormLabel>Email or username</FormLabel>
                       <FormControl>
-                        <Input placeholder="m@example.com" {...field} />
+                        <Input placeholder="m@example.com" autoComplete="username" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -82,7 +83,7 @@ const LoginPage = () => {
                     <FormItem>
                       <FormLabel>Password</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="********" {...field} />
+                        <Input type="password" placeholder="********" autoComplete="current-password" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -94,13 +95,13 @@ const LoginPage = () => {
               </form>
             </Form>
           </CardContent>
-          <CardFooter className="flex justify-between">
-            <a href="#" className="text-sm text-gray-500 hover:underline">
-              Forgot password?
-            </a>
-            <a href="#" className="text-sm text-gray-500 hover:underline">
-              Sign up
-            </a>
+          <CardFooter className="flex justify-end">
+            <p className="text-sm text-gray-500">
+              New here?{' '}
+              <Link to="/register" className="font-medium text-foreground hover:underline">
+                Sign up
+              </Link>
+            </p>
           </CardFooter>
         </Card>
       </motion.div>

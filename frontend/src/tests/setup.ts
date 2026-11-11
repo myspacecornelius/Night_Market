@@ -101,6 +101,8 @@ vi.mock('@/lib/api-client', () => {
       })),
     ),
     logout: vi.fn(),
+    register: vi.fn(async () => mockUser),
+    changePassword: vi.fn(async () => ({ message: 'Password changed', other_sessions_ended: 0 })),
   };
 
   return {

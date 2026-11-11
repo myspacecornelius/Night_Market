@@ -11,6 +11,7 @@ const Leaderboard = lazy(() => import('@/app/routes/leaderboard'));
 const ThriftRoutes = lazy(() => import('@/pages/ThriftRoutes'));
 const Profile = lazy(() => import('@/app/routes/profile'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
+const RegisterPage = lazy(() => import('@/pages/RegisterPage'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
 const ProtectedRoute = lazy(() => import('./auth/ProtectedRoute'));
 
@@ -82,6 +83,14 @@ const router = createBrowserRouter([
     element: (
       <Suspense fallback={<div>Loading...</div>}>
         <LoginPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/register',
+    element: (
+      <Suspense fallback={<div>Loading...</div>}>
+        <RegisterPage />
       </Suspense>
     ),
   },

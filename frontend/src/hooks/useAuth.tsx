@@ -7,12 +7,15 @@ import { getAccessToken } from '@/lib/auth-tokens'
 import type { User } from '@/lib/api-client'
 import { type LoginFormData, type RegisterFormData } from '@/lib/validations/auth'
 
+/** What creating an account needs; the sign-up form collects more (the confirmation). */
+export type RegistrationDetails = Pick<RegisterFormData, 'username' | 'email' | 'password' | 'displayName'>
+
 export interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
   login: (data: LoginFormData) => Promise<void>
-  register: (data: RegisterFormData) => Promise<void>
+  register: (data: RegistrationDetails) => Promise<void>
   logout: (options?: { silent?: boolean }) => void
   refreshUser: () => Promise<void>
 }
@@ -90,7 +93,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   // Register mutation
   const registerMutation = useMutation({
-    mutationFn: async (data: RegisterFormData) => {
+    mutationFn: async (data: RegistrationDetails) => {
       try {
         return await apiClient.register({
           username: data.username,
@@ -100,7 +103,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         })
       } catch (error: any) {
         if (error.response?.status === 409) {
-          throw new Error('Username or email already exists')
+          // the API says which one is taken
+          const detail = error.response?.data?.detail
+          throw new Error(typeof detail === 'string' ? detail : 'Username or email already exists')
         } else if (error.response?.status === 429) {
           throw new Error('Too many sign-up attempts. Please try again later.')
         } else if (typeof error.response?.data?.detail === 'string') {
@@ -111,7 +116,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     },
     onSuccess: () => {
-      toast.success('Account created successfully! Please log in.')
+      toast.success('Account created')
     },
     onError: (error: Error) => {
       toast.error(error.message)
@@ -122,7 +127,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await loginMutation.mutateAsync(data)
   }
 
-  const register = async (data: RegisterFormData) => {
+  const register = async (data: RegistrationDetails) => {
     await registerMutation.mutateAsync(data)
   }
 
