@@ -201,6 +201,15 @@ def test_replaying_a_rotated_refresh_token_ends_every_session(client, db_session
     assert client.get("/auth/me", headers=bearer).status_code == 401
     assert client.post("/auth/refresh", json={"refresh_token": second["refresh_token"]}).status_code == 401
 
+    # the owner signs in again; presenting the copied token once more must not sign them out again
+    fresh = client.post("/auth/token", data={"username": "rotator", "password": PASSWORD}).json()
+    db_session.query(UserSession).filter(
+        UserSession.refresh_token_hash == UserSession.hash_refresh_token(first["refresh_token"])
+    ).update({"last_used_at": datetime.now(timezone.utc) - timedelta(minutes=5)})
+    db_session.commit()
+    assert client.post("/auth/refresh", json={"refresh_token": first["refresh_token"]}).status_code == 401
+    assert client.get("/auth/me", headers={"Authorization": f"Bearer {fresh['access_token']}"}).status_code == 200
+
 
 def test_oversized_bodies_are_refused_before_they_are_parsed(client, make_user, auth_headers):
     headers = auth_headers(make_user())

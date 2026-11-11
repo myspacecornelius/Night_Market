@@ -217,7 +217,9 @@ def claim_refresh_session(db: Session, refresh_token: str) -> Optional[UserSessi
 
     A token that was exchanged earlier and turns up again was probably copied. Which
     of the two holders is the real one cannot be told, so every session of that
-    account is ended and the owner signs in again.
+    account is ended and the owner signs in again. That happens once: the account's
+    used-up tokens are then marked as handled, so whoever holds the copy cannot keep
+    signing the owner out by presenting it again.
     """
     token_hash = UserSession.hash_refresh_token(refresh_token)
     now = datetime.now(timezone.utc)
@@ -247,6 +249,12 @@ def claim_refresh_session(db: Session, refresh_token: str) -> Optional[UserSessi
         and now - replayed.last_used_at > timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS)
     ):
         revoke_user_sessions(db, replayed.user_id, "refresh_reuse")
+        db.execute(
+            update(UserSession)
+            .where(UserSession.user_id == replayed.user_id, UserSession.revoked_reason == 'refresh')
+            .values(revoked_reason='refresh_reuse')
+        )
+        db.commit()
     return None
 
 def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):

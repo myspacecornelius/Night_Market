@@ -161,6 +161,16 @@ def boost_post(db: Session, post_id: UUID, booster_id: UUID, amount: int = DEFAU
     if post.user_id == booster_id:
         raise LacesError("Cannot boost your own post")
 
+    # Lock both accounts in a fixed order before changing either. The debit and the
+    # credit below each lock one user row; two people boosting each other's posts at
+    # the same moment took them in opposite orders and one request died as a deadlock.
+    db.execute(
+        select(User.user_id)
+        .where(User.user_id.in_([booster_id, post.user_id]))
+        .order_by(User.user_id)
+        .with_for_update()
+    ).all()
+
     sent = apply_laces(
         db, booster_id, -amount, "BOOST_SENT",
         related_post_id=post_id, description=f"Boosted post with {amount} LACES",

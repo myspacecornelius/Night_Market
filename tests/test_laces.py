@@ -300,3 +300,79 @@ def test_concurrent_debits_cannot_overdraw(migrated_db):
             cleanup.query(LacesLedger).filter(LacesLedger.user_id == user_id).delete()
             cleanup.query(User).filter(User.user_id == user_id).delete()
             cleanup.commit()
+
+
+def test_two_users_boosting_each_other_do_not_deadlock(migrated_db, monkeypatch):
+    """A boost debits the booster and credits the author: two user rows are locked.
+
+    Two people boosting each other's posts at the same moment used to take those
+    locks in opposite orders, and PostgreSQL ended one request as a deadlock.
+    """
+    import threading
+    import uuid
+
+    from sqlalchemy.orm import Session
+
+    from services.core import laces as laces_service
+    from services.models.post import Post
+    from services.models.user import User
+
+    ids = {}
+    with Session(migrated_db) as setup:
+        for name in ("a", "b"):
+            suffix = uuid.uuid4().hex[:12]
+            user = User(
+                username=f"mutual_{suffix}", email=f"mutual_{suffix}@example.com", display_name="Mutual",
+                password_hash="x", laces_balance=100,
+            )
+            setup.add(user)
+            setup.flush()
+            post = Post(user_id=user.user_id, post_type="GENERAL", content_text="boost me")
+            setup.add(post)
+            setup.flush()
+            ids[name] = (user.user_id, post.post_id)
+        setup.commit()
+
+    barrier = threading.Barrier(2)
+    real_apply = laces_service.apply_laces
+
+    def apply_then_meet(db, user_id, amount, transaction_type, **kwargs):
+        entry = real_apply(db, user_id, amount, transaction_type, **kwargs)
+        if transaction_type == "BOOST_SENT":
+            # Hold both requests at "booster debited, author not yet credited": the
+            # interleaving that deadlocked. With ordered locking the second request is
+            # still waiting for its locks and never arrives, so stop waiting after a moment.
+            try:
+                barrier.wait(timeout=2)
+            except threading.BrokenBarrierError:
+                pass
+        return entry
+
+    monkeypatch.setattr(laces_service, "apply_laces", apply_then_meet)
+    errors = []
+
+    def boost(booster, target):
+        with Session(migrated_db) as session:
+            try:
+                laces_service.boost_post(session, ids[target][1], ids[booster][0], 10)
+                session.commit()
+            except Exception as error:  # the deadlock arrives as an OperationalError
+                session.rollback()
+                errors.append(error)
+
+    threads = [threading.Thread(target=boost, args=pair) for pair in (("a", "b"), ("b", "a"))]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert not errors, errors
+        with Session(migrated_db) as check:
+            # each paid 10 and received half of the other's 10
+            assert [check.get(User, ids[name][0]).laces_balance for name in ("a", "b")] == [95, 95]
+    finally:
+        with Session(migrated_db) as cleanup:
+            for user_id, _post_id in ids.values():
+                cleanup.query(User).filter(User.user_id == user_id).delete()
+            cleanup.commit()
