@@ -5,12 +5,15 @@ from sqlalchemy.orm import Session
 
 from services import models, schemas
 from services.database import get_db
-from services.core.security import DUMMY_PASSWORD_HASH, verify_password
+from services.core.password import PasswordPolicy
+from services.core.security import DUMMY_PASSWORD_HASH, get_password_hash, verify_password
 from services.core.auth import (
     get_current_active_user,
     claim_refresh_session,
     issue_tokens,
-    revoke_user_sessions
+    oauth2_scheme,
+    revoke_user_sessions,
+    verify_access_token,
 )
 from services.routers.users import register_user
 from services.schemas.user import UserCreate
@@ -101,6 +104,38 @@ def logout(
         "message": "Successfully logged out",
         "sessions_revoked": revoked_count
     }
+
+@router.post("/password")
+def change_password(
+    change: schemas.PasswordChange,
+    token: str = Depends(oauth2_scheme),
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Change the signed-in user's password and end their sessions everywhere else.
+
+    Whoever else holds the old password, or a token obtained with it, is signed out;
+    the session making this request carries on.
+    """
+    # 400, not 401: the caller is signed in, and a 401 would make the web client try
+    # to renew the session and then sign them out.
+    if not verify_password(change.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The current password is incorrect")
+    if change.new_password == change.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="The new password must differ from the current one"
+        )
+    is_valid, message = PasswordPolicy.validate(change.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+    current_user.password_hash = get_password_hash(change.new_password)
+    this_session = verify_access_token(token).get("sid")
+    ended = revoke_user_sessions(  # commits the new password together with the revocations
+        db, str(current_user.user_id), "password_change", keep_session_id=this_session
+    )
+    return {"message": "Password changed", "other_sessions_ended": ended}
+
 
 @router.get("/me", response_model=schemas.User)
 def read_users_me(current_user: models.User = Depends(get_current_active_user)):

@@ -172,3 +172,44 @@ def test_old_sessions_are_deleted_and_expired_ones_revoked(db_session, make_user
     db_session.expire_all()
     remaining = {row.id: row.is_revoked for row in db_session.query(UserSession).filter(UserSession.user_id == user.user_id)}
     assert remaining == {ids["live"]: "0", ids["just_expired"]: "1", ids["rotated"]: "1"}  # long_gone is deleted
+
+
+NEW_PASSWORD = "An0ther-Secret-Pass!"
+
+
+def test_changing_the_password_signs_out_everywhere_else(client):
+    _register(client)
+    here = _login(client, "night_owl").json()
+    elsewhere = _login(client, "night_owl").json()  # another device, or someone who has the password
+
+    changed = client.post(
+        "/auth/password", json={"current_password": PASSWORD, "new_password": NEW_PASSWORD}, headers=_bearer(here)
+    )
+
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["other_sessions_ended"] == 1
+    # this session carries on; the other one is over, access token and refresh token alike
+    assert client.get("/auth/me", headers=_bearer(here)).status_code == 200
+    assert client.get("/auth/me", headers=_bearer(elsewhere)).status_code == 401
+    assert client.post("/auth/refresh", json={"refresh_token": elsewhere["refresh_token"]}).status_code == 401
+    # and only the new password signs in
+    assert _login(client, "night_owl").status_code == 401
+    assert _login(client, "night_owl", NEW_PASSWORD).status_code == 200
+
+
+def test_password_change_checks_the_current_password_and_the_policy(client):
+    _register(client)
+    headers = _bearer(_login(client, "night_owl").json())
+
+    def change(current, new, **kwargs):
+        return client.post("/auth/password", json={"current_password": current, "new_password": new}, **kwargs)
+
+    assert change(PASSWORD, NEW_PASSWORD).status_code == 401  # not signed in
+    wrong = change("not-my-password", NEW_PASSWORD, headers=headers)
+    assert wrong.status_code == 400 and "current password" in wrong.json()["detail"].lower()
+    assert change(PASSWORD, "short", headers=headers).status_code == 400
+    assert change(PASSWORD, PASSWORD, headers=headers).status_code == 400  # must actually change
+    assert change(PASSWORD, "x" * 5000, headers=headers).status_code in (400, 422)
+
+    # nothing above changed anything
+    assert _login(client, "night_owl").status_code == 200

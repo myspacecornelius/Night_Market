@@ -259,12 +259,15 @@ def claim_refresh_session(db: Session, refresh_token: str) -> Optional[UserSessi
         db.commit()
     return None
 
-def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):
-    """Revoke all sessions for a user"""
-    sessions = db.query(UserSession).filter(
+def revoke_user_sessions(db: Session, user_id: str, reason: str = "security", keep_session_id=None):
+    """Revoke a user's sessions: all of them, or all but ``keep_session_id``."""
+    query = db.query(UserSession).filter(
         UserSession.user_id == user_id,
         UserSession.is_revoked == '0'
-    ).all()
+    )
+    if keep_session_id is not None:
+        query = query.filter(UserSession.id != keep_session_id)
+    sessions = query.all()
     
     for session in sessions:
         session.revoke(reason)

@@ -217,6 +217,8 @@ POSTING_LIMIT: Dict[str, Any] = {"max_requests": 50, "window": 3600, "per_user":
 RATE_LIMIT_CONFIGS: Dict[Tuple[str, str], Dict[str, Any]] = {
     ("POST", "/auth/token"): {"max_requests": 5, "window": 300, "per_user": False},  # 5 per 5 minutes per IP
     ("POST", "/auth/refresh"): {"max_requests": 10, "window": 300, "per_user": True},  # 10 per 5 minutes per user
+    # Each attempt checks the current password, so this is a place to guess it from a stolen session
+    ("POST", "/auth/password"): {"max_requests": 5, "window": 900, "per_user": True},  # 5 per 15 minutes per user
     # Registration is served on two routes: 5 per hour per IP across both
     ("POST", "/auth/register"): REGISTRATION_LIMIT,
     ("POST", "/users/"): REGISTRATION_LIMIT,
