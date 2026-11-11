@@ -132,7 +132,7 @@ services:
     image: prom/prometheus:v2.47.2
     ports:
       # Prometheus has no authentication: reachable from this machine only
-      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
