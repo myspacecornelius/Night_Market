@@ -1,360 +1,382 @@
-import React, { useState, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useQuery } from '@tanstack/react-query'
-import { 
-  Trophy, 
-  Medal, 
-  Award, 
-  Search, 
-  Filter, 
-  Calendar,
-  TrendingUp,
-  Users,
+import { useId, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Award,
+  CircleAlert,
+  Coins,
   Crown,
-  Star,
-  Zap
+  MapPin,
+  Medal,
+  Radio,
+  RefreshCw,
+  Search,
+  Trophy,
+  UserRound,
+  Users
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import type { LucideIcon } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/cn'
-import { apiClient } from '@/lib/api-client'
-import { useAuth } from '@/hooks/useAuth'
-import { useWebSocket } from '@/hooks/useWebSocket'
+import { LeaderboardAPI } from '@/lib/api/leaderboard'
+import type { Leaderboard as LeaderboardData, LeaderboardEntry, LeaderboardType } from '@/lib/api/leaderboard'
 
-interface LeaderboardEntry {
-  id: string
-  rank: number
-  user: {
-    id: string
-    username: string
-    displayName: string
-    avatar?: string
-  }
-  score: number
-  change: number
-  streak: number
-  badges: string[]
-  lastActive: string
+interface BoardOption {
+  type: LeaderboardType
+  /** Label of the tab that selects the board. */
+  label: string
+  icon: LucideIcon
+  /** Shown when the API returns no rows for the board. */
+  emptyHint: string
 }
 
-interface LeaderboardData {
-  entries: LeaderboardEntry[]
-  totalUsers: number
-  userRank?: number
+const BOARDS: BoardOption[] = [
+  { type: 'laces', label: 'LACES', icon: Coins, emptyHint: 'There are no active members to rank yet.' },
+  { type: 'posts', label: 'Signals', icon: Radio, emptyHint: 'No one has posted a public signal yet.' },
+  { type: 'checkins', label: 'Check-ins', icon: MapPin, emptyHint: 'No one has checked in at a drop zone yet.' }
+]
+
+/** How many members to ask the API for (it accepts 1 to 50). */
+const LIMITS = [10, 25, 50] as const
+
+const LEADERBOARD_KEY = ['leaderboard'] as const
+
+const numberFormat = new Intl.NumberFormat('en-US')
+
+function boardOption(type: LeaderboardType): BoardOption {
+  return BOARDS.find((board) => board.type === type) ?? BOARDS[0]
 }
 
-type TimeFrame = '24h' | '7d' | '30d' | 'all'
-type LeaderboardType = 'overall' | 'activity' | 'achievements' | 'contributions'
+function isBoardType(value: string): value is LeaderboardType {
+  return BOARDS.some((board) => board.type === value)
+}
 
-export default function Leaderboard() {
-  const { user } = useAuth()
-  const { subscribe } = useWebSocket()
-  const [searchTerm, setSearchTerm] = useState('')
-  const [timeFrame, setTimeFrame] = useState<TimeFrame>('7d')
-  const [leaderboardType, setLeaderboardType] = useState<LeaderboardType>('overall')
-  const [showFilters, setShowFilters] = useState(false)
+/**
+ * Where the signed-in user stands on the board. `settled` is false while the rows on
+ * screen are still those of a shorter list, when "not in the list" proves nothing yet.
+ */
+function standingMessage(board: LeaderboardData, limit: number, settled: boolean): string | null {
+  const own = board.items.find((entry) => entry.isCurrentUser)
+  if (own) return `Your rank: #${own.rank}`
+  if (!settled) return null
+  return board.items.length >= limit ? `You are outside the top ${limit}` : 'You are not on this board yet'
+}
 
-  // Mock data - would come from API
-  const { data: leaderboardData, isLoading } = useQuery({
-    queryKey: ['leaderboard', leaderboardType, timeFrame],
-    queryFn: async (): Promise<LeaderboardData> => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const mockEntries: LeaderboardEntry[] = Array.from({ length: 50 }, (_, i) => ({
-        id: `user-${i + 1}`,
-        rank: i + 1,
-        user: {
-          id: `user-${i + 1}`,
-          username: `user${i + 1}`,
-          displayName: `User ${i + 1}`,
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=user${i + 1}`
-        },
-        score: Math.max(1000 - i * 20 + Math.random() * 100, 10),
-        change: Math.floor(Math.random() * 20) - 10,
-        streak: Math.floor(Math.random() * 30),
-        badges: ['contributor', 'explorer', 'achiever'].slice(0, Math.floor(Math.random() * 3) + 1),
-        lastActive: new Date(Date.now() - Math.random() * 86400000 * 7).toISOString()
-      }))
-
-      return {
-        entries: mockEntries,
-        totalUsers: mockEntries.length,
-        userRank: user ? Math.floor(Math.random() * 50) + 1 : undefined
-      }
-    },
-    staleTime: 2 * 60 * 1000, // 2 minutes
-  })
-
-  // Filter entries based on search term
-  const filteredEntries = useMemo(() => {
-    if (!leaderboardData?.entries) return []
-    
-    return leaderboardData.entries.filter(entry =>
-      entry.user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.user.username.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  }, [leaderboardData?.entries, searchTerm])
-
-  // Subscribe to real-time leaderboard updates
-  React.useEffect(() => {
-    const unsubscribe = subscribe('leaderboard_update', (data) => {
-      // Handle real-time leaderboard updates
-      console.log('Leaderboard update:', data)
-    })
-
-    return unsubscribe
-  }, [subscribe])
-
-  const getRankIcon = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return <Crown className="h-5 w-5 text-yellow-500" />
-      case 2:
-        return <Medal className="h-5 w-5 text-gray-400" />
-      case 3:
-        return <Award className="h-5 w-5 text-amber-600" />
-      default:
-        return <span className="text-sm font-bold text-muted-foreground">#{rank}</span>
-    }
+function RankMark({ rank }: { rank: number }) {
+  if (rank > 3) {
+    return <span className="text-sm font-bold text-muted-foreground">#{rank}</span>
   }
+  return (
+    <>
+      {rank === 1 && <Crown className="h-5 w-5 text-yellow-500" aria-hidden="true" />}
+      {rank === 2 && <Medal className="h-5 w-5 text-gray-400" aria-hidden="true" />}
+      {rank === 3 && <Award className="h-5 w-5 text-amber-600" aria-hidden="true" />}
+      <span className="sr-only">Rank {rank}</span>
+    </>
+  )
+}
 
-  const getBadgeIcon = (badge: string) => {
-    switch (badge) {
-      case 'contributor':
-        return <Star className="h-3 w-3" />
-      case 'explorer':
-        return <TrendingUp className="h-3 w-3" />
-      case 'achiever':
-        return <Zap className="h-3 w-3" />
-      default:
-        return <Trophy className="h-3 w-3" />
-    }
-  }
-
-  const timeFrameLabels = {
-    '24h': 'Last 24 Hours',
-    '7d': 'Last 7 Days',
-    '30d': 'Last 30 Days',
-    'all': 'All Time'
-  }
+function EntryRow({ entry, unit, index }: { entry: LeaderboardEntry; unit: string; index: number }) {
+  // Anonymous members come back without an id, as "anonymous" and without an avatar.
+  const isAnonymous = entry.userId === null
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Leaderboard</h1>
-          <p className="text-muted-foreground">
-            See how you rank among {leaderboardData?.totalUsers || 0} users
-          </p>
-        </div>
-        
-        {/* User's Current Rank */}
-        {user && leaderboardData?.userRank && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-lg"
-          >
-            <Trophy className="h-4 w-4" />
-            <span className="font-medium">Your Rank: #{leaderboardData.userRank}</span>
-          </motion.div>
+    <motion.li
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.02 }}
+      aria-current={entry.isCurrentUser ? 'true' : undefined}
+      className={cn(
+        'flex items-center gap-3 p-3 lg:gap-4 lg:p-4 rounded-lg transition-colors duration-200 hover:bg-muted/50',
+        entry.rank <= 3 && 'bg-gradient-to-r from-primary/5 to-transparent border border-primary/20',
+        entry.isCurrentUser && 'ring-2 ring-primary/50 bg-primary/5'
+      )}
+    >
+      <div className="flex items-center justify-center w-6 lg:w-8 shrink-0">
+        <RankMark rank={entry.rank} />
+      </div>
+
+      <Avatar className="h-8 w-8 lg:h-10 lg:w-10">
+        {entry.avatar && <AvatarImage src={entry.avatar} alt="" />}
+        <AvatarFallback aria-hidden="true" className="text-xs lg:text-base">
+          {isAnonymous ? <UserRound className="h-5 w-5 text-muted-foreground" /> : entry.username.slice(0, 2).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        {/* A long username is cut with an ellipsis; the title keeps the whole of it within reach. */}
+        <span
+          title={isAnonymous ? undefined : `@${entry.username}`}
+          className={cn('font-medium truncate', isAnonymous ? 'text-muted-foreground italic' : 'text-foreground')}
+        >
+          {isAnonymous ? 'Anonymous' : `@${entry.username}`}
+        </span>
+        {entry.isCurrentUser && (
+          <Badge variant="secondary" className="text-xs shrink-0">You</Badge>
         )}
       </div>
 
-      {/* Controls */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
+      <div className="shrink-0 text-right text-sm lg:text-base font-bold text-foreground">
+        {numberFormat.format(entry.value)}
+        <span className="sr-only"> {unit}</span>
+      </div>
+    </motion.li>
+  )
+}
 
-            {/* Time Frame */}
-            <Select value={timeFrame} onValueChange={(value: TimeFrame) => setTimeFrame(value)}>
-              <SelectTrigger className="w-[180px]">
-                <Calendar className="h-4 w-4 mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(timeFrameLabels).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+export default function Leaderboard() {
+  const queryClient = useQueryClient()
+  const searchId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [boardType, setBoardType] = useState<LeaderboardType>('laces')
+  const [limit, setLimit] = useState<number>(LIMITS[0])
+  const [searchTerm, setSearchTerm] = useState('')
 
-            {/* Filters Toggle */}
-            <Button
-              variant="outline"
-              onClick={() => setShowFilters(!showFilters)}
-              className={cn(showFilters && 'bg-muted')}
+  const boardQuery = useQuery({
+    queryKey: [...LEADERBOARD_KEY, boardType, limit],
+    queryFn: () => LeaderboardAPI.getLeaderboard({ type: boardType, limit }),
+    // Changing the list length keeps the rows of the same board on screen while the longer list loads.
+    placeholderData: (previous) => (previous?.type === boardType ? previous : undefined)
+  })
+
+  const board = boardQuery.data
+  const isResizing = boardQuery.isPlaceholderData
+  const standing = board ? standingMessage(board, limit, !isResizing) : null
+
+  // Rows show usernames as "@name", so accept a search typed that way too.
+  const term = searchTerm.trim().toLowerCase().replace(/^@/, '')
+  const visibleEntries = board
+    ? board.items.filter((entry) => entry.username.toLowerCase().includes(term))
+    : []
+
+  // While a request is running, Refresh and Retry ignore clicks but are not `disabled`:
+  // a button that becomes disabled while it has keyboard focus drops the focus to <body>.
+  const isFetching = boardQuery.isFetching
+  const busyClass = isFetching && 'cursor-default opacity-50'
+
+  const refresh = () => {
+    if (isFetching) return
+    // Every cached board is out of date, not only the one on screen.
+    void queryClient.invalidateQueries({ queryKey: LEADERBOARD_KEY })
+  }
+
+  const retry = () => {
+    if (isFetching) return
+    // The error message and its Retry button go away once the board reloads. Move keyboard
+    // focus to the board's panel first, so it is not dropped back to the top of the page.
+    panelRef.current?.focus()
+    void boardQuery.refetch()
+  }
+
+  return (
+    // A one-column grid, not a plain block: its minmax(0, 1fr) track keeps wide content (a long
+    // username, which must not wrap) from stretching the page past the screen, so the name is
+    // cut with an ellipsis instead of the whole app scrolling sideways on a phone.
+    <div className="grid grid-cols-1 gap-6">
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Leaderboard</h1>
+          <p className="text-muted-foreground">
+            See who leads the community in LACES, signals and drop zone check-ins
+          </p>
+        </div>
+
+        {/* The signed-in user's place on the selected board */}
+        <div role="status" aria-label="Your standing" className="shrink-0">
+          {standing && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-lg"
             >
-              <Filter className="h-4 w-4 mr-2" />
-              Filters
-            </Button>
-          </div>
+              <Trophy className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="font-medium">{standing}</span>
+            </motion.div>
+          )}
+        </div>
+      </div>
 
-          {/* Advanced Filters */}
-          <AnimatePresence>
-            {showFilters && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mt-4 pt-4 border-t"
-              >
-                <Tabs value={leaderboardType} onValueChange={(value: LeaderboardType) => setLeaderboardType(value)}>
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="overall">Overall</TabsTrigger>
-                    <TabsTrigger value="activity">Activity</TabsTrigger>
-                    <TabsTrigger value="achievements">Achievements</TabsTrigger>
-                    <TabsTrigger value="contributions">Contributions</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </CardContent>
-      </Card>
-
-      {/* Leaderboard */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-primary" />
-            {timeFrameLabels[timeFrame]} Rankings
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 p-4 rounded-lg bg-muted/50 animate-pulse">
-                  <div className="w-8 h-8 bg-muted rounded-full" />
-                  <div className="w-10 h-10 bg-muted rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <div className="w-32 h-4 bg-muted rounded" />
-                    <div className="w-24 h-3 bg-muted rounded" />
-                  </div>
-                  <div className="w-16 h-6 bg-muted rounded" />
-                </div>
+      <Tabs
+        value={boardType}
+        onValueChange={(value) => {
+          if (isBoardType(value)) setBoardType(value)
+        }}
+        className="space-y-6"
+      >
+        {/* Controls. Below the lg breakpoint the card's own padding is dropped: its content already has one. */}
+        <Card className="p-0 lg:p-6">
+          <CardContent className="pt-6 space-y-4">
+            <TabsList aria-label="Leaderboards" className="grid w-full grid-cols-3">
+              {BOARDS.map(({ type, label, icon: Icon }) => (
+                <TabsTrigger key={type} value={type}>
+                  {/* Three labels with icons do not fit across a phone; the labels stay. */}
+                  <Icon className="hidden sm:block h-4 w-4 mr-2 shrink-0" aria-hidden="true" />
+                  {label}
+                </TabsTrigger>
               ))}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <AnimatePresence mode="popLayout">
-                {filteredEntries.map((entry, index) => (
-                  <motion.div
-                    key={entry.id}
-                    layout
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.2, delay: index * 0.02 }}
-                    className={cn(
-                      'flex items-center gap-4 p-4 rounded-lg transition-all duration-200 hover:bg-muted/50',
-                      entry.rank <= 3 && 'bg-gradient-to-r from-primary/5 to-transparent border border-primary/20',
-                      user?.id === entry.user.id && 'ring-2 ring-primary/50 bg-primary/5'
-                    )}
+            </TabsList>
+
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+              {/* Search */}
+              <div className="flex-1">
+                <Label htmlFor={searchId} className="sr-only">Search members on this board</Label>
+                <div className="relative">
+                  <Search
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    id={searchId}
+                    type="search"
+                    placeholder="Search members..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              {/* List length */}
+              <div role="group" aria-label="Number of members shown" className="flex items-center gap-2">
+                {LIMITS.map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    size="sm"
+                    variant={limit === option ? 'default' : 'outline'}
+                    aria-pressed={limit === option}
+                    onClick={() => setLimit(option)}
                   >
-                    {/* Rank */}
-                    <div className="flex items-center justify-center w-8">
-                      {getRankIcon(entry.rank)}
-                    </div>
-
-                    {/* Avatar */}
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={entry.user.avatar} alt={entry.user.displayName} />
-                      <AvatarFallback>
-                        {entry.user.displayName.split(' ').map(n => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-
-                    {/* User Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-foreground truncate">
-                          {entry.user.displayName}
-                        </h3>
-                        {user?.id === entry.user.id && (
-                          <Badge variant="secondary" className="text-xs">You</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <span>@{entry.user.username}</span>
-                        {entry.streak > 0 && (
-                          <div className="flex items-center gap-1">
-                            <Zap className="h-3 w-3 text-orange-500" />
-                            <span>{entry.streak} day streak</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Badges */}
-                    <div className="hidden sm:flex items-center gap-1">
-                      {entry.badges.map((badge) => (
-                        <Badge
-                          key={badge}
-                          variant="outline"
-                          className="text-xs flex items-center gap-1"
-                        >
-                          {getBadgeIcon(badge)}
-                          <span className="capitalize">{badge}</span>
-                        </Badge>
-                      ))}
-                    </div>
-
-                    {/* Score and Change */}
-                    <div className="text-right">
-                      <div className="font-bold text-foreground">
-                        {entry.score.toLocaleString()}
-                      </div>
-                      {entry.change !== 0 && (
-                        <div className={cn(
-                          'text-xs flex items-center gap-1',
-                          entry.change > 0 ? 'text-green-600' : 'text-red-600'
-                        )}>
-                          <TrendingUp className={cn(
-                            'h-3 w-3',
-                            entry.change < 0 && 'rotate-180'
-                          )} />
-                          {entry.change > 0 ? '+' : ''}{entry.change}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
+                    Top {option}
+                  </Button>
                 ))}
-              </AnimatePresence>
+              </div>
 
-              {filteredEntries.length === 0 && searchTerm && (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No users found matching "{searchTerm}"</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={refresh}
+                aria-disabled={isFetching}
+                className={cn(busyClass)}
+              >
+                <RefreshCw className={cn('h-4 w-4 mr-2', isFetching && 'animate-spin')} aria-hidden="true" />
+                Refresh
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Leaderboard */}
+        <TabsContent ref={panelRef} key={boardType} value={boardType} className="mt-0">
+          <Card className="p-0 lg:p-6">
+            {board && (
+              <CardHeader className="px-4 lg:px-6">
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="h-5 w-5 text-primary" aria-hidden="true" />
+                  {board.title}
+                </CardTitle>
+                <CardDescription>{board.subtitle}</CardDescription>
+              </CardHeader>
+            )}
+            <CardContent className={cn('space-y-4 px-4 lg:px-6', !board && 'pt-6')}>
+              {boardQuery.isError && (
+                <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div role="alert" className="flex items-start gap-3">
+                    <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium">
+                        {board
+                          ? 'Could not refresh the leaderboard. Showing the last loaded rankings.'
+                          : 'Could not load the leaderboard'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{boardQuery.error.message}</p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={retry}
+                    aria-disabled={isFetching}
+                    className={cn(busyClass)}
+                  >
+                    {isFetching ? 'Retrying…' : 'Retry'}
+                  </Button>
                 </div>
               )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
+              {boardQuery.isPending && (
+                <div role="status" aria-label="Loading leaderboard" className="space-y-3">
+                  {/* A status region is announced by its content, not by its label. */}
+                  <span className="sr-only">Loading leaderboard…</span>
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 lg:gap-4 lg:p-4 rounded-lg bg-muted/50">
+                      <Skeleton className="w-6 h-6 lg:w-8 lg:h-8 rounded-full" />
+                      <Skeleton className="w-8 h-8 lg:w-10 lg:h-10 rounded-full" />
+                      <Skeleton className="flex-1 h-4" />
+                      <Skeleton className="w-16 h-6" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {board && board.items.length === 0 && (
+                <div role="status" className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" aria-hidden="true" />
+                  <p className="font-medium text-foreground">No one is on this board yet</p>
+                  <p className="text-sm">{boardOption(board.type).emptyHint}</p>
+                </div>
+              )}
+
+              {board && board.items.length > 0 && visibleEntries.length === 0 && (
+                <div role="status" className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" aria-hidden="true" />
+                  <p>No members on this board match "{searchTerm.trim()}"</p>
+                  <Button type="button" variant="link" className="mt-2" onClick={() => setSearchTerm('')}>
+                    Clear search
+                  </Button>
+                </div>
+              )}
+
+              {board && visibleEntries.length > 0 && (
+                <div>
+                  {/* Column headings for sighted users; each row repeats the unit for screen readers. */}
+                  <div
+                    aria-hidden="true"
+                    className="flex items-center gap-3 px-3 lg:gap-4 lg:px-4 pb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  >
+                    <span className="w-6 lg:w-8 text-center">#</span>
+                    <span className="flex-1">Member</span>
+                    <span>{board.unit}</span>
+                  </div>
+                  <ol
+                    aria-label={board.title}
+                    aria-busy={isResizing}
+                    className={cn('space-y-2', isResizing && 'opacity-60')}
+                  >
+                    {visibleEntries.map((entry, index) => (
+                      <EntryRow
+                        key={`${entry.rank}-${entry.userId ?? 'anonymous'}`}
+                        entry={entry}
+                        unit={board.unit}
+                        index={index}
+                      />
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
