@@ -32,12 +32,6 @@ const StatusCell: React.FC<{ status: Item['status'] }> = ({ status }) => {
 
 export const ItemTable: React.FC<ItemTableProps> = ({ items, isLoading, onRowClick }) => {
     const [sorting, setSorting] = React.useState<SortingState>([]);
-    const [error, setError] = React.useState<string | null>(null);
-
-    React.useEffect(() => {
-        // Example of setting an error
-        // setError("Failed to load data."); // Uncomment to simulate an error
-    }, []);
 
     const columns = useMemo<ColumnDef<Item>[]>(
         () => [

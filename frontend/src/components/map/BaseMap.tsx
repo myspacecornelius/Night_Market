@@ -1,6 +1,6 @@
 import * as React from "react"
 import { MapContainer, TileLayer, useMap, useMapEvents } from "react-leaflet"
-import { LatLngExpression, Map as LeafletMap } from "leaflet"
+import { type LatLngExpression, Map as LeafletMap } from "leaflet"
 import { cn } from "@/lib/utils"
 import "leaflet/dist/leaflet.css"
 

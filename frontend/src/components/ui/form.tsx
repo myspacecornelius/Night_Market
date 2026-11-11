@@ -16,7 +16,7 @@ const FormFieldContext = React.createContext<FormFieldContextValue>({
   name: "",
 })
 
-export function FormField<TFieldValues extends Record<string, any>, TName extends string>(
+export function FormField<TName extends string>(
   props: {
     name: TName
     control?: any

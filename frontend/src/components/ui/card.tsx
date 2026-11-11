@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { motion } from "framer-motion"
+import type { HTMLMotionProps } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
@@ -51,7 +52,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
         whileHover={interactive ? { scale: 1.02 } : undefined}
         whileTap={interactive ? { scale: 0.98 } : undefined}
         transition={{ type: "spring", stiffness: 400, damping: 17 }}
-        {...props}
+        {...(props as HTMLMotionProps<"div">)}
       />
     )
   }

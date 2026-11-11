@@ -1,10 +1,9 @@
-import * as React from "react"
-import { Rectangle, Popup, useMap } from "react-leaflet"
+import { Rectangle, Popup} from "react-leaflet"
 import { LatLngBounds } from "leaflet"
 import { motion } from "framer-motion"
 import { Flame, Users, MapPin, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { MapBounds } from "./BaseMap"
+import { type MapBounds } from "./BaseMap"
 
 export interface HeatMapBin {
   geohash: string
@@ -81,7 +80,6 @@ function HeatTile({
   bin, 
   zoom, 
   onTileClick,
-  showLabels = false 
 }: { 
   bin: HeatMapBin
   zoom: number
@@ -222,7 +220,6 @@ export function HeatMapOverlay({
   data,
   isLoading = false,
   zoom,
-  bounds,
   timeWindow = "24h",
   onTileClick,
   showLabels = false,

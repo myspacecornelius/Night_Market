@@ -1,7 +1,5 @@
-import * as React from "react"
-import { Circle, Marker, Popup, useMap } from "react-leaflet"
-import { LatLngExpression, divIcon } from "leaflet"
-import { motion } from "framer-motion"
+import { Circle, Marker, Popup} from "react-leaflet"
+import { type LatLngExpression, divIcon } from "leaflet"
 import { 
   MapPin, 
   Users, 
@@ -11,7 +9,6 @@ import {
   Timer, 
   User,
   Crown,
-  Star,
   Navigation
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -87,7 +84,6 @@ function createDropZoneIcon(zone: DropZone, size: number = 32): L.DivIcon {
 
 // Get zone status details
 function getZoneStatusInfo(zone: DropZone) {
-  const now = new Date()
   const startsAt = zone.starts_at ? new Date(zone.starts_at) : null
   const endsAt = zone.ends_at ? new Date(zone.ends_at) : null
 
@@ -147,7 +143,6 @@ function getRoleIcon(role?: string) {
 // Individual drop zone component
 function DropZoneMarker({
   zone,
-  userLocation,
   onZoneClick,
   onCheckIn,
   onJoinZone,

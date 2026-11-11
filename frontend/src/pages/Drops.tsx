@@ -1,5 +1,4 @@
 
-import React from 'react';
 import WarRoomPane from '@/components/hyperlocal/WarRoomPane';
 
 const Drops = () => {

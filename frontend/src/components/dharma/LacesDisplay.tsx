@@ -1,4 +1,3 @@
-import * as React from "react"
 import { motion } from "framer-motion"
 import { Flame, TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"

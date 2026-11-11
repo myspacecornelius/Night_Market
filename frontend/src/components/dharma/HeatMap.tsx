@@ -1,10 +1,10 @@
 import * as React from "react"
 import { motion } from "framer-motion"
-import { LatLngExpression } from "leaflet"
+import { type LatLngExpression } from "leaflet"
 import { cn } from "@/lib/utils"
-import { BaseMap, MapBounds } from "@/components/map/BaseMap"
-import { HeatMapOverlay, HeatMapData, HeatMapBin } from "@/components/map/HeatMapOverlay"
-import { DropZoneLayer, DropZone } from "@/components/map/DropZoneLayer"
+import { BaseMap, type MapBounds } from "@/components/map/BaseMap"
+import { HeatMapOverlay, type HeatMapData, type HeatMapBin } from "@/components/map/HeatMapOverlay"
+import { DropZoneLayer, type DropZone } from "@/components/map/DropZoneLayer"
 
 interface HeatMapProps {
   heatMapData?: HeatMapData

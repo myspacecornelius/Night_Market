@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/auth-tokens'
 import type { User } from '@/lib/api-client'
-import { LoginFormData, RegisterFormData } from '@/lib/validations/auth'
+import { type LoginFormData, type RegisterFormData } from '@/lib/validations/auth'
 
 export interface AuthContextType {
   user: User | null

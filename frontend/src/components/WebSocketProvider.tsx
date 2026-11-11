@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   WebSocketManager,
-  WebSocketMessage,
-  WebSocketContextType,
+  type WebSocketMessage,
+  type WebSocketContextType,
   WebSocketContext,
   useWebSocket as useSharedWebSocket,
 } from '../lib/websocket';
