@@ -118,7 +118,6 @@ test:
 clean:
 	@echo "🧹 Cleaning up Docker resources..."
 	@docker compose down -v --remove-orphans
-	@docker system prune -f
 	@echo "✅ Cleanup complete"
 
 # Full reset - nuclear option

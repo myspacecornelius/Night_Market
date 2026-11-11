@@ -50,9 +50,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Migrations run before the server starts, so the database has to accept
+    # connections first; without the conditions the container exited on a slow start.
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - appnet
 

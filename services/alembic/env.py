@@ -27,7 +27,9 @@ fileConfig(config.config_file_name)
 # Get the database url from the environment variable and set it in the config
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # ConfigParser treats "%" as interpolation, so a percent-encoded password
+    # (p%40ss for p@ss) made every alembic command fail before connecting.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 
 # add your model's MetaData object here

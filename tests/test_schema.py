@@ -172,3 +172,26 @@ def test_migrations_build_an_empty_database(migrated_db):
         with admin.connect() as connection:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         admin.dispose()
+
+
+def test_alembic_accepts_a_percent_encoded_database_url(migrated_db):
+    """A password with a reserved character is percent-encoded in the URL (p%40ss for p@ss).
+
+    Alembic's settings go through ConfigParser, which reads "%" as interpolation:
+    every alembic command failed before it connected.
+    """
+    root = Path(__file__).resolve().parent.parent
+    url = migrated_db.url.render_as_string(hide_password=False)
+    password = migrated_db.url.password or ""
+    assert password, "the test database URL needs a password for this check"
+    # the same password with its first character percent-encoded
+    encoded = url.replace(f":{password}@", f":%{ord(password[0]):02X}{password[1:]}@", 1)
+    assert "%" in encoded
+
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore", "-m", "alembic", "current"],
+        cwd=str(root / "services"), env={**os.environ, "DATABASE_URL": encoded, "PYTHONPATH": str(root)},
+        capture_output=True, text=True, timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr[-1500:]
