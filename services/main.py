@@ -59,13 +59,18 @@ if SENTRY_DSN:
     logger.info("🛰️ Sentry enabled")
 
 async def _warm_critical_caches():
-    """Fire-and-forget warming for top endpoints."""
+    """Ask the worker, once, to rebuild the heatmap caches.
+
+    Queueing the task is a blocking call to the broker, so it runs in a thread: with
+    Redis unreachable it took about 19 seconds, and on the event loop that froze the
+    whole API for that long. The task used to be queued once per city with a zone
+    filter that matches no cache key, so each run rebuilt the same entries.
+    """
     try:
         from worker.tasks import refresh_heatmap_cache  # lazy import to avoid Celery unless needed
 
-        logger.info("🔥 Scheduling heatmap warmup for major metros")
-        for city in ["boston", "nyc", "la", "chicago"]:
-            refresh_heatmap_cache.delay(zones=[city])
+        await asyncio.to_thread(refresh_heatmap_cache.delay)
+        logger.info("🔥 Heatmap warm-up queued")
     except Exception as exc:
         logger.warning("Unable to warm caches on startup: %s", exc)
 

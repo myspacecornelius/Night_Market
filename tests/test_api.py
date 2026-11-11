@@ -209,3 +209,41 @@ def test_metrics_count_requests_by_route_template(client, make_user, auth_header
     assert 'http_request_duration_seconds_bucket{le="0.5",method="GET",route="/v1/dropzones/{dropzone_id}"}' in metrics
     assert 'laces_ledger_entries_total{transaction_type="DAILY_STIPEND"}' in metrics
     assert 'laces_amount_total{direction="credit",transaction_type="DAILY_STIPEND"}' in metrics
+
+
+def test_startup_warmup_queues_one_task_off_the_event_loop(monkeypatch):
+    """Queueing a Celery task is a blocking Redis call. With the broker unreachable it
+    took about 19 seconds, and the API served nothing meanwhile. It also queued the
+    task four times with a filter that matched no cache key."""
+    import asyncio
+    import time
+
+    from services import main
+    from worker import tasks
+
+    calls = []
+
+    def slow_delay(*args, **kwargs):
+        calls.append((args, kwargs))
+        time.sleep(0.3)  # a broker that is slow to answer
+
+    monkeypatch.setattr(tasks.refresh_heatmap_cache, "delay", slow_delay)
+
+    async def scenario():
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        running = asyncio.create_task(ticker())
+        await main._warm_critical_caches()
+        running.cancel()
+        return ticks
+
+    ticks = asyncio.run(scenario())
+
+    assert calls == [((), {})]  # once, for everything
+    assert ticks >= 5, "the event loop was blocked while the task was being queued"
