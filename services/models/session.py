@@ -1,6 +1,6 @@
 import uuid
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -52,7 +52,7 @@ class UserSession(Base):
     
     def is_expired(self) -> bool:
         """Check if session is expired"""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     def is_active(self) -> bool:
         """Check if session is active (not revoked and not expired)"""

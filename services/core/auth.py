@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from jose import JWTError, jwt
@@ -30,15 +30,13 @@ class TokenPair:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token"""
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+
     to_encode.update({
         "exp": expire,
         "type": "access",
-        "iat": datetime.utcnow()
+        "iat": now
     })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -46,17 +44,19 @@ def create_refresh_token() -> str:
     """Create cryptographically secure refresh token"""
     return secrets.token_urlsafe(32)
 
-def create_token_pair(user_id: str, username: str) -> TokenPair:
-    """Create access and refresh token pair"""
-    access_token = create_access_token(
-        data={"sub": username, "user_id": user_id}
-    )
+def issue_tokens(db: Session, user: models.User, request: Request) -> TokenPair:
+    """Start a session for the user and return its access and refresh tokens.
+
+    The access token carries the session id (``sid``), so revoking the session
+    (logout, refresh rotation) also ends the access token instead of leaving it
+    valid until it expires.
+    """
     refresh_token = create_refresh_token()
-    
-    return TokenPair(
-        access_token=access_token,
-        refresh_token=refresh_token
+    session = create_user_session(db, str(user.user_id), refresh_token, request)
+    access_token = create_access_token(
+        data={"sub": user.username, "user_id": str(user.user_id), "sid": str(session.id)}
     )
+    return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
 def verify_access_token(token: str) -> dict:
     """Verify and decode access token"""
@@ -86,9 +86,9 @@ def create_user_session(
     request: Request
 ) -> UserSession:
     """Create a new user session with device tracking"""
-    # Extract client info
-    ip_address = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("User-Agent", "unknown")
+    # Extract client info, trimmed to the column sizes
+    ip_address = (request.client.host if request.client else "unknown")[:45]
+    user_agent = request.headers.get("User-Agent", "unknown")[:500]
     
     # Create device fingerprint
     device_fingerprint = UserSession.create_device_fingerprint(ip_address, user_agent)
@@ -100,7 +100,7 @@ def create_user_session(
         device_fingerprint=device_fingerprint,
         ip_address=ip_address,
         user_agent=user_agent,
-        expires_at=datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     )
     
     db.add(session)
@@ -121,8 +121,19 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             detail="User not found"
         )
     
+    # A token issued for a session stops working once that session is revoked
+    session_id = payload.get("sid")
+    if session_id is not None:
+        session = db.get(UserSession, session_id)
+        if session is None or not session.is_active():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session is no longer valid",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     # Update last active time
-    user.last_active_at = datetime.utcnow()
+    user.last_active_at = datetime.now(timezone.utc)
     db.commit()
     
     return user
@@ -145,7 +156,7 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
     """Get current active user (not banned/disabled)"""
     if not current_user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive user"
         )
     return current_user
@@ -174,7 +185,7 @@ def validate_refresh_token(db: Session, refresh_token: str) -> Optional[UserSess
         return None
     
     # Update last used time
-    session.last_used_at = datetime.utcnow()
+    session.last_used_at = datetime.now(timezone.utc)
     db.commit()
     
     return session
@@ -195,7 +206,7 @@ def revoke_user_sessions(db: Session, user_id: str, reason: str = "security"):
 def cleanup_expired_sessions(db: Session) -> int:
     """Clean up expired sessions (run periodically)"""
     expired_sessions = db.query(UserSession).filter(
-        UserSession.expires_at < datetime.utcnow(),
+        UserSession.expires_at < datetime.now(timezone.utc),
         UserSession.is_revoked == '0'
     ).all()
     

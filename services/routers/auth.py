@@ -1,22 +1,35 @@
-
-from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from services import models, schemas
 from services.database import get_db
 from services.core.security import verify_password
 from services.core.auth import (
-    create_token_pair, 
-    create_user_session,
-    get_current_user,
-    get_current_active_user, 
+    get_current_active_user,
+    issue_tokens,
     validate_refresh_token,
     revoke_user_sessions
 )
+from services.routers.users import register_user
+from services.schemas.user import UserCreate
 
 router = APIRouter(tags=["auth"])
+
+
+def _token_response(token_pair) -> schemas.TokenPair:
+    return schemas.TokenPair(
+        access_token=token_pair.access_token,
+        refresh_token=token_pair.refresh_token,
+        token_type=token_pair.token_type
+    )
+
+
+@router.post("/register", response_model=schemas.User, status_code=status.HTTP_201_CREATED)
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    """Create an account (same as POST /users/)."""
+    return register_user(user, db)
 
 @router.post("/token", response_model=schemas.TokenPair)
 async def login_for_access_token(
@@ -24,8 +37,11 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
-    """Enhanced login with refresh token support"""
-    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    """Log in with a username or e-mail address and password."""
+    identifier = form_data.username.strip()
+    user = db.query(models.User).filter(
+        or_(models.User.username == identifier, func.lower(models.User.email) == identifier.lower())
+    ).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -35,21 +51,11 @@ async def login_for_access_token(
     
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive user"
         )
-    
-    # Create token pair
-    token_pair = create_token_pair(str(user.user_id), user.username)
-    
-    # Create session for refresh token tracking
-    create_user_session(db, str(user.user_id), token_pair.refresh_token, request)
-    
-    return schemas.TokenPair(
-        access_token=token_pair.access_token,
-        refresh_token=token_pair.refresh_token,
-        token_type=token_pair.token_type
-    )
+
+    return _token_response(issue_tokens(db, user, request))
 
 @router.post("/refresh", response_model=schemas.TokenPair)
 async def refresh_access_token(
@@ -57,7 +63,7 @@ async def refresh_access_token(
     refresh_request: schemas.RefreshTokenRequest,
     db: Session = Depends(get_db)
 ):
-    """Refresh access token using refresh token"""
+    """Exchange a refresh token for a new token pair. The old pair stops working."""
     session = validate_refresh_token(db, refresh_request.refresh_token)
     
     if not session:
@@ -74,21 +80,11 @@ async def refresh_access_token(
             detail="User not found or inactive"
         )
     
-    # Revoke old session and create new token pair
+    # Rotate: revoke the old session, then start a new one
     session.revoke("refresh")
     db.commit()
-    
-    # Create new token pair
-    token_pair = create_token_pair(str(user.user_id), user.username)
-    
-    # Create new session
-    create_user_session(db, str(user.user_id), token_pair.refresh_token, request)
-    
-    return schemas.TokenPair(
-        access_token=token_pair.access_token,
-        refresh_token=token_pair.refresh_token,
-        token_type=token_pair.token_type
-    )
+
+    return _token_response(issue_tokens(db, user, request))
 
 @router.post("/logout")
 async def logout(
