@@ -8,6 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
+from services.core.metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
+
 logger = logging.getLogger("dharma.tracing")
 
 
@@ -26,8 +28,19 @@ class TracingMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
         request.state.start_time = start_time
 
-        response = await call_next(request)
-        duration_ms = (time.perf_counter() - start_time) * 1000
+        status_code = 500  # what the client gets if the handler raises
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        finally:
+            duration = time.perf_counter() - start_time
+            # The matched route's template; unmatched paths share one label value.
+            route = request.scope.get("route")
+            route_label = getattr(route, "path", None) or "unmatched"
+            if route_label != "/metrics":
+                HTTP_REQUESTS.labels(request.method, route_label, str(status_code)).inc()
+                HTTP_REQUEST_DURATION.labels(request.method, route_label).observe(duration)
+        duration_ms = duration * 1000
 
         response.headers["X-Request-ID"] = request_id
 

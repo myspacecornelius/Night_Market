@@ -12,6 +12,7 @@ from services.database import get_db
 from services.core import laces as laces_service
 from services.core.auth import get_current_active_user, get_optional_user
 from services.core.geospatial import parse_bbox, within_bbox
+from services.core.metrics import DROPZONE_CHECKINS
 from services.models.dropzone import DropZone, DropZoneMember, DropZoneCheckIn, DropZoneStatus, MemberRole
 from services.models.user import User
 
@@ -374,6 +375,7 @@ async def check_in_to_dropzone(
         reference_id=str(checkin.id),
     )
     db.commit()
+    DROPZONE_CHECKINS.inc()
     
     return {
         "success": True,

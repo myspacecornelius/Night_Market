@@ -1,0 +1,12 @@
+# Tells Grafana to load the dashboard JSON files in this directory.
+# Without a provider file the JSON files next to it were never loaded.
+apiVersion: 1
+
+providers:
+  - name: night-market
+    folder: Night Market
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

@@ -12,6 +12,7 @@ import logging
 
 import redis
 
+from services.core.metrics import POSTS_CREATED
 from services.core.redis_client import r
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ def create_post(post: PostCreate, db: Session = Depends(get_db), current_user: U
     db.commit()
     db.refresh(db_post)
     _invalidate_feeds()
+    POSTS_CREATED.labels("post").inc()
     return db_post
 
 @router.get("/feed", response_model=List[PostSchema])

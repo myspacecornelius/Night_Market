@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
+from services.core.metrics import LACES_AMOUNT, LACES_LEDGER_ENTRIES
 from services.models.dropzone import DropZoneCheckIn
 from services.models.laces import LacesLedger
 from services.models.post import Post
@@ -75,6 +76,8 @@ def apply_laces(
     )
     db.add(entry)
     db.flush()
+    LACES_LEDGER_ENTRIES.labels(transaction_type).inc()
+    LACES_AMOUNT.labels(transaction_type, "credit" if amount > 0 else "debit").inc(abs(amount))
     return entry
 
 

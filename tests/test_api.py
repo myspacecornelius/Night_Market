@@ -190,3 +190,22 @@ def test_unexpected_constraint_and_type_errors_are_not_500s(client, db_session):
         db_session.rollback()
     finally:
         app.router.routes[:] = [route for route in app.router.routes if not getattr(route, "path", "").startswith("/_probe/")]
+
+
+def test_metrics_count_requests_by_route_template(client, make_user, auth_headers):
+    import uuid
+
+    headers = auth_headers(make_user())
+    zone_id = uuid.uuid4()
+    assert client.get(f"/v1/dropzones/{zone_id}").status_code == 404
+    assert client.get("/no/such/path").status_code == 404
+    assert client.post("/v1/laces/daily-stipend", headers=headers).status_code == 200
+
+    metrics = client.get("/metrics/").text
+
+    assert 'http_requests_total{method="GET",route="/v1/dropzones/{dropzone_id}",status="404"}' in metrics
+    assert 'route="unmatched"' in metrics
+    assert str(zone_id) not in metrics  # raw paths would create one series per id
+    assert 'http_request_duration_seconds_bucket{le="0.5",method="GET",route="/v1/dropzones/{dropzone_id}"}' in metrics
+    assert 'laces_ledger_entries_total{transaction_type="DAILY_STIPEND"}' in metrics
+    assert 'laces_amount_total{direction="credit",transaction_type="DAILY_STIPEND"}' in metrics

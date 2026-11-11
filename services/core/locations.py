@@ -4,6 +4,7 @@ from sqlalchemy import func
 import geohash2
 from uuid import UUID
 
+from services.core.metrics import POSTS_CREATED
 from services.models import location as location_models
 from services.models import post as post_models
 from services.schemas import post as post_schemas
@@ -44,5 +45,6 @@ def create_location_and_post(
     db.add(db_post)
     db.commit()
     db.refresh(db_post)
+    POSTS_CREATED.labels("hyperlocal").inc()
 
     return db_post
