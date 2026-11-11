@@ -3,11 +3,10 @@ import uuid
 import redis
 from typing import Optional, Dict, Any, Tuple
 from fastapi import Request, HTTPException, status
-from jose import JWTError, jwt
 from starlette.routing import Match
 import json
 
-from services.core.security import ALGORITHM, SECRET_KEY
+from services.core.tokens import TokenError, decode_token
 
 
 def authenticated_user_id(request: Request) -> Optional[str]:
@@ -23,8 +22,8 @@ def authenticated_user_id(request: Request) -> Optional[str]:
     if scheme.lower() != "bearer" or not token:
         return None
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
-    except JWTError:
+        payload = decode_token(token)
+    except TokenError:
         return None
     if payload.get("type") != "access":
         return None

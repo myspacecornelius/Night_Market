@@ -4,14 +4,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from services import models
-from services.core.security import ALGORITHM, SECRET_KEY
+from services.core.tokens import TokenError, decode_token, encode_token
 from services.database import get_db
 from services.models.session import UserSession
 
@@ -46,7 +45,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         "type": "access",
         "iat": now
     })
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encode_token(to_encode)
 
 def create_refresh_token() -> str:
     """Create cryptographically secure refresh token"""
@@ -69,7 +68,7 @@ def issue_tokens(db: Session, user: models.User, request: Request) -> TokenPair:
 def verify_access_token(token: str) -> dict:
     """Verify and decode access token"""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
+        payload = decode_token(token)
         username: str = payload.get("sub")
         token_type: str = payload.get("type")
         
@@ -80,7 +79,7 @@ def verify_access_token(token: str) -> dict:
             )
         
         return payload
-    except JWTError:
+    except TokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

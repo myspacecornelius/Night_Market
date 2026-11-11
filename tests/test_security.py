@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from jose import jwt
+import jwt
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_SECRET = "dharma_jwt_secret_key_change_in_production_use_openssl_rand_hex_32"
@@ -363,3 +363,39 @@ def test_the_database_refuses_usernames_that_differ_only_by_case(db_session, mak
                 username=first.username.upper(), email="upper@example.com", display_name="U", password_hash="x",
             ))
             db_session.flush()
+
+
+def test_tokens_issued_on_a_slightly_faster_clock_are_accepted(client, make_user):
+    """Two servers' clocks never agree exactly. "Issued at" is informational here."""
+    user = make_user()
+    now = datetime.now(timezone.utc)
+    claims = {
+        "sub": user.username, "user_id": str(user.user_id), "type": "access",
+        "iat": now + timedelta(seconds=30), "exp": now + timedelta(minutes=5),
+    }
+
+    assert client.get("/auth/me", headers=_token(claims)).status_code == 200
+
+
+def test_unsigned_and_wrongly_signed_tokens_are_rejected(client, make_user):
+    import base64
+    import json
+
+    from services.core.security import ALGORITHM
+
+    user = make_user()
+    claims = {
+        "sub": user.username, "user_id": str(user.user_id), "type": "access",
+        "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+    }
+
+    def segment(value):
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+    unsigned = f"{segment({'alg': 'none', 'typ': 'JWT'})}.{segment(claims)}."
+    other_key = jwt.encode(claims, "someone-elses-signing-key-0123456789abcdef", algorithm=ALGORITHM)
+    other_algorithm = jwt.encode(claims, "x" * 64, algorithm="HS512")
+
+    for token in (unsigned, other_key, other_algorithm, "not-a-token", ""):
+        response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401, token[:20]
