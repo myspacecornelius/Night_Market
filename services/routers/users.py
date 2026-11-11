@@ -8,7 +8,7 @@ from services.database import get_db
 from services.core.password import PasswordPolicy
 from services.core.security import get_password_hash
 from services.models.user import User
-from services.schemas.user import UserCreate, User as UserSchema, UserPublic
+from services.schemas.user import UserCreate, User as UserSchema, UserPublic, UserUpdate
 
 router = APIRouter()
 
@@ -62,3 +62,21 @@ def get_users(
         .limit(limit)
         .all()
     )
+
+
+@router.patch("/me", response_model=UserSchema)
+def update_me(
+    changes: UserUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Change the signed-in user's own profile. Only the fields that were sent change.
+
+    The body can only name the fields of UserUpdate; the account's username, e-mail
+    address, role, status and balance cannot be changed here.
+    """
+    for field, value in changes.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
